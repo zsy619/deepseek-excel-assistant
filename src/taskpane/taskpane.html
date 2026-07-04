@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+    />
+    <title>DeepSeek Excel Assistant</title>
+
+    <!-- Office.js is loaded by the host; for local dev we point to the
+         CDN copy as a fallback so the page works when sideloaded outside
+         Excel. -->
+    <script src="https://appsforoffice.microsoft.com/lib/1.1/hosted/office.js"></script>
+
+    <!-- highlight.js theme (GitHub-like) loaded as plain CSS - Office
+         webview sometimes drops <link> tags injected by JS, so we ship
+         the stylesheet through webpack instead. The actual style tag is
+         emitted by taskpane.ts after construction. -->
+  </head>
+  <body>
+    <!-- Sideload message shown until Office.js reports ready. The host
+         replaces this with the real app on initializeApp(). -->
+    <div id="sideload-msg" class="sideload-msg">
+      <div class="sideload-spinner"></div>
+      <p>正在加载 DeepSeek Excel Assistant…</p>
+    </div>
+
+    <!-- Main app shell - hidden until initializeApp runs. -->
+    <div id="app-body" class="app-shell" style="display:none">
+      <!-- ChatWindow mounts itself here. SettingsPanel and HistoryPanel
+           are appended as overlays. -->
+      <div id="app-root" class="app-root"></div>
+    </div>
+
+    <noscript>
+      <p class="noscript-warning">
+        本插件需要启用 JavaScript 才能运行。
+      </p>
+    </noscript>
+  </body>
+</html>
