@@ -814,3 +814,389 @@ export async function recommendChartStream(
     callbacks.onError
   );
 }
+
+/* ----------------------------------------------------------------- *
+ * Phase 4 — AI completion helpers for advanced-analysis panels       *
+ *                                                                  *
+ * Each helper mirrors the diagnoseFormulasStream shape: stream     *
+ * chatCompletion → onPartial raw JSON → onDone parsed result.      *
+ *                                                                  *
+ * On parse failure we fall back to a placeholder so the panel      *
+ * still renders something meaningful. Real implementations         *
+ * should progressively replace these stubs with deeper analysis.   *
+ * ----------------------------------------------------------------- */
+
+/* ===== B.1 Correlation matrix ===================================== */
+
+export interface CorrelationRequest {
+  selection: string;
+  headers: string[];
+  /** Up to ~30 sample rows so the model can estimate Pearson r. */
+  samples: Array<Record<string, string | number | null>>;
+}
+
+export interface CorrelationResult {
+  labels: string[];
+  cells: Array<{ row: number; col: number; value: number; rowLabel?: string; colLabel?: string }>;
+  reasoning: string;
+}
+
+function buildCorrelationMessages(req: CorrelationRequest): ChatMessage[] {
+  const system =
+    "你是数据分析助手。请根据用户给出的数据样例,计算每对列的 Pearson 相关系数 r。" +
+    "只返回严格 JSON,字段 { labels: string[], cells: [{row,col,value,rowLabel?,colLabel?}], reasoning }。" +
+    "labels 与列名一致;cells 是 NxN 矩阵,r∈[-1,+1];不要包含任何解释文本。";
+  const sampleMd = (req.samples || []).slice(0, 20).map((r) =>
+    Object.entries(r).map(([k, v]) => `${k}=${v}`).join(", ")
+  ).join("\n");
+  const user =
+    `选区:${req.selection}\n列:${req.headers.join(", ")}\n样例(前 20 行):\n${sampleMd}\n\n` +
+    "返回 JSON。";
+  return [
+    { role: "system" as const, content: system },
+    { role: "user" as const, content: user },
+  ] as unknown as ChatMessage[];
+}
+
+function tryParseCorrelationJson(text: string): CorrelationResult {
+  const fallback: CorrelationResult = {
+    labels: [],
+    cells: [],
+    reasoning: "AI 响应无法解析",
+  };
+  if (!text) return fallback;
+  const cleaned = text.replace(/^```(?:json)?/im, "").replace(/```$/m, "").trim();
+  const trySlice = (s: string): CorrelationResult | null => {
+    try {
+      const v = JSON.parse(s);
+      if (!v || !Array.isArray(v.labels) || !Array.isArray(v.cells)) return null;
+      return v as CorrelationResult;
+    } catch {
+      return null;
+    }
+  };
+  return (
+    trySlice(cleaned) ||
+    trySlice(cleaned.slice(cleaned.indexOf("{"), cleaned.lastIndexOf("}") + 1)) ||
+    fallback
+  );
+}
+
+export async function correlationStream(
+  req: CorrelationRequest,
+  config: DeepSeekConfig,
+  callbacks: {
+    onPartial?: (raw: string) => void;
+    onDone: (result: CorrelationResult) => void;
+    onError: (err: ApiError) => void;
+  }
+): Promise<AbortController> {
+  let accumulated = "";
+  return chatCompletionStream(
+    buildCorrelationMessages(req),
+    config,
+    (_c, total) => {
+      accumulated = total;
+      callbacks.onPartial?.(accumulated);
+    },
+    (full) => callbacks.onDone(tryParseCorrelationJson(full)),
+    callbacks.onError
+  );
+}
+
+/* ===== B.2 Outlier detection ====================================== */
+
+export interface OutlierRequest {
+  selection: string;
+  headers: string[];
+  samples: Array<Record<string, string | number | null>>;
+  method?: "zscore" | "iqr" | "ai";
+}
+
+export interface OutlierResult {
+  method: "zscore" | "iqr" | "ai";
+  outliers: Array<{
+    rowIndex: number;
+    column: string;
+    value: string | number;
+    zScore?: number;
+    reason: string;
+  }>;
+  summary: string;
+}
+
+function buildOutlierMessages(req: OutlierRequest): ChatMessage[] {
+  const system =
+    "你是数据质量助手。检测样例数据中的异常值,用 Z-score 或 IQR,只返回严格 JSON " +
+    "{ method: 'zscore'|'iqr'|'ai', outliers: [{rowIndex,column,value,zScore?,reason}], summary }。" +
+    "rowIndex 是样例中的位置(从 1 开始),reason 用中文一句话。";
+  const sampleMd = (req.samples || []).slice(0, 30).map((r, i) =>
+    `${i + 1}: ` + Object.entries(r).map(([k, v]) => `${k}=${v}`).join(", ")
+  ).join("\n");
+  const user =
+    `选区:${req.selection}\n方法:${req.method || "zscore"}\n列:${req.headers.join(", ")}\n样例:\n${sampleMd}\n\n` +
+    "返回 JSON。";
+  return [
+    { role: "system" as const, content: system },
+    { role: "user" as const, content: user },
+  ] as unknown as ChatMessage[];
+}
+
+function tryParseOutlierJson(text: string): OutlierResult {
+  const fallback: OutlierResult = { method: "zscore", outliers: [], summary: "AI 响应无法解析" };
+  if (!text) return fallback;
+  const cleaned = text.replace(/^```(?:json)?/im, "").replace(/```$/m, "").trim();
+  try {
+    const v = JSON.parse(cleaned);
+    if (v && Array.isArray(v.outliers)) return v as OutlierResult;
+  } catch { /* noop */ }
+  const s = cleaned.indexOf("{"), e = cleaned.lastIndexOf("}");
+  if (s >= 0 && e > s) {
+    try {
+      const v = JSON.parse(cleaned.slice(s, e + 1));
+      if (v && Array.isArray(v.outliers)) return v as OutlierResult;
+    } catch { /* noop */ }
+  }
+  return fallback;
+}
+
+export async function outlierStream(
+  req: OutlierRequest,
+  config: DeepSeekConfig,
+  callbacks: {
+    onPartial?: (raw: string) => void;
+    onDone: (result: OutlierResult) => void;
+    onError: (err: ApiError) => void;
+  }
+): Promise<AbortController> {
+  let accumulated = "";
+  return chatCompletionStream(
+    buildOutlierMessages(req),
+    config,
+    (_c, total) => { accumulated = total; callbacks.onPartial?.(accumulated); },
+    (full) => callbacks.onDone(tryParseOutlierJson(full)),
+    callbacks.onError
+  );
+}
+
+/* ===== B.3 Pivot spec ============================================= */
+
+export interface PivotSpecRequest {
+  selection: string;
+  headers: string[];
+  samples: Array<Record<string, string | number | null>>;
+}
+
+export interface PivotSpecResult {
+  rows: string[];
+  columns: string[];
+  values: Array<{ column: string; aggregation: "sum" | "count" | "avg" }>;
+  rationale: string;
+}
+
+function buildPivotSpecMessages(req: PivotSpecRequest): ChatMessage[] {
+  const system =
+    "你是数据分析助手。根据列名和样例数据,推荐最合理的透视表布局。" +
+    "只返回 JSON { rows: string[], columns: string[], values: [{column,aggregation}], rationale }。" +
+    "分类/字符串列 → rows/columns;数字列 → values.aggregation ∈ {sum,count,avg};rationale 一句话中文。";
+  const sampleMd = (req.samples || []).slice(0, 10).map((r) =>
+    Object.entries(r).map(([k, v]) => `${k}=${v}`).join(", ")
+  ).join("\n");
+  const user =
+    `选区:${req.selection}\n列:${req.headers.join(", ")}\n样例:\n${sampleMd}\n\n` +
+    "返回 JSON。";
+  return [
+    { role: "system" as const, content: system },
+    { role: "user" as const, content: user },
+  ] as unknown as ChatMessage[];
+}
+
+function tryParsePivotSpecJson(text: string): PivotSpecResult {
+  const fallback: PivotSpecResult = { rows: [], columns: [], values: [], rationale: "AI 响应无法解析" };
+  if (!text) return fallback;
+  const cleaned = text.replace(/^```(?:json)?/im, "").replace(/```$/m, "").trim();
+  try {
+    const v = JSON.parse(cleaned);
+    if (v && Array.isArray(v.values)) return v as PivotSpecResult;
+  } catch { /* noop */ }
+  const s = cleaned.indexOf("{"), e = cleaned.lastIndexOf("}");
+  if (s >= 0 && e > s) {
+    try {
+      const v = JSON.parse(cleaned.slice(s, e + 1));
+      if (v && Array.isArray(v.values)) return v as PivotSpecResult;
+    } catch { /* noop */ }
+  }
+  return fallback;
+}
+
+export async function pivotSpecStream(
+  req: PivotSpecRequest,
+  config: DeepSeekConfig,
+  callbacks: {
+    onPartial?: (raw: string) => void;
+    onDone: (result: PivotSpecResult) => void;
+    onError: (err: ApiError) => void;
+  }
+): Promise<AbortController> {
+  let accumulated = "";
+  return chatCompletionStream(
+    buildPivotSpecMessages(req),
+    config,
+    (_c, total) => { accumulated = total; callbacks.onPartial?.(accumulated); },
+    (full) => callbacks.onDone(tryParsePivotSpecJson(full)),
+    callbacks.onError
+  );
+}
+
+/* ===== B.4 Report ================================================= */
+
+export interface ReportRequest {
+  selection: string;
+  headers: string[];
+  rowCount: number;
+  columnCount: number;
+  samples: Array<Record<string, string | number | null>>;
+}
+
+export interface ReportResult {
+  title: string;
+  summary: string;
+  sections: Array<{ heading: string; body: string }>;
+  recommendations: string[];
+}
+
+function buildReportMessages(req: ReportRequest): ChatMessage[] {
+  const system =
+    "你是高级数据分析师。基于样例数据生成结构化报告。只返回 JSON " +
+    "{ title, summary, sections: [{heading,body}], recommendations: string[] }。" +
+    "summary 2-3 句中文;每个 section 含 heading + body;recommendations 3-5 条具体建议。";
+  const sampleMd = (req.samples || []).slice(0, 25).map((r) =>
+    Object.entries(r).map(([k, v]) => `${k}=${v}`).join(", ")
+  ).join("\n");
+  const user =
+    `选区:${req.selection}\n规模:${req.rowCount} 行 × ${req.columnCount} 列\n列:${req.headers.join(", ")}\n样例:\n${sampleMd}\n\n` +
+    "返回 JSON。";
+  return [
+    { role: "system" as const, content: system },
+    { role: "user" as const, content: user },
+  ] as unknown as ChatMessage[];
+}
+
+function tryParseReportJson(text: string): ReportResult {
+  const fallback: ReportResult = { title: "数据报告", summary: "AI 响应无法解析", sections: [], recommendations: [] };
+  if (!text) return fallback;
+  const cleaned = text.replace(/^```(?:json)?/im, "").replace(/```$/m, "").trim();
+  try {
+    const v = JSON.parse(cleaned);
+    if (v && typeof v.title === "string") return v as ReportResult;
+  } catch { /* noop */ }
+  const s = cleaned.indexOf("{"), e = cleaned.lastIndexOf("}");
+  if (s >= 0 && e > s) {
+    try {
+      const v = JSON.parse(cleaned.slice(s, e + 1));
+      if (v && typeof v.title === "string") return v as ReportResult;
+    } catch { /* noop */ }
+  }
+  return fallback;
+}
+
+export async function reportStream(
+  req: ReportRequest,
+  config: DeepSeekConfig,
+  callbacks: {
+    onPartial?: (raw: string) => void;
+    onDone: (result: ReportResult) => void;
+    onError: (err: ApiError) => void;
+  }
+): Promise<AbortController> {
+  let accumulated = "";
+  return chatCompletionStream(
+    buildReportMessages(req),
+    config,
+    (_c, total) => { accumulated = total; callbacks.onPartial?.(accumulated); },
+    (full) => callbacks.onDone(tryParseReportJson(full)),
+    callbacks.onError
+  );
+}
+
+/* ===== B.5 Column type inference ================================== */
+
+export type ColumnType =
+  | "number" | "currency" | "percent" | "date" | "boolean"
+  | "categorical" | "text" | "unknown";
+
+export interface ColumnTypeRequest {
+  selection: string;
+  headers: string[];
+  samples: Array<Record<string, string | number | null>>;
+}
+
+export interface ColumnTypeRowResult {
+  column: string;
+  proposedType: ColumnType;
+  confidence: number;
+  format?: string;
+  namedRange?: string;
+  reason?: string;
+}
+
+export interface ColumnTypeResult {
+  rows: ColumnTypeRowResult[];
+  summary: string;
+}
+
+function buildColumnTypeMessages(req: ColumnTypeRequest): ChatMessage[] {
+  const system =
+    "你是数据建模助手。基于列名和样例值,推断每列的数据类型。只返回 JSON " +
+    "{ rows: [{column,proposedType,confidence,format?,namedRange?,reason?}], summary }。" +
+    "proposedType ∈ {number,currency,percent,date,boolean,categorical,text,unknown};" +
+    "confidence ∈ [0,1];format 是 Excel 数字格式串(可选);reason 一句话中文。";
+  const colSamples = (req.headers || []).map((h) => {
+    const vals = (req.samples || []).map((r) => r[h]).filter((v) => v !== null && v !== undefined).slice(0, 8);
+    return `${h}: ${vals.join(", ")}`;
+  }).join("\n");
+  const user =
+    `选区:${req.selection}\n列样例:\n${colSamples}\n\n` +
+    "返回 JSON。";
+  return [
+    { role: "system" as const, content: system },
+    { role: "user" as const, content: user },
+  ] as unknown as ChatMessage[];
+}
+
+function tryParseColumnTypeJson(text: string): ColumnTypeResult {
+  const fallback: ColumnTypeResult = { rows: [], summary: "AI 响应无法解析" };
+  if (!text) return fallback;
+  const cleaned = text.replace(/^```(?:json)?/im, "").replace(/```$/m, "").trim();
+  try {
+    const v = JSON.parse(cleaned);
+    if (v && Array.isArray(v.rows)) return v as ColumnTypeResult;
+  } catch { /* noop */ }
+  const s = cleaned.indexOf("{"), e = cleaned.lastIndexOf("}");
+  if (s >= 0 && e > s) {
+    try {
+      const v = JSON.parse(cleaned.slice(s, e + 1));
+      if (v && Array.isArray(v.rows)) return v as ColumnTypeResult;
+    } catch { /* noop */ }
+  }
+  return fallback;
+}
+
+export async function columnTypeStream(
+  req: ColumnTypeRequest,
+  config: DeepSeekConfig,
+  callbacks: {
+    onPartial?: (raw: string) => void;
+    onDone: (result: ColumnTypeResult) => void;
+    onError: (err: ApiError) => void;
+  }
+): Promise<AbortController> {
+  let accumulated = "";
+  return chatCompletionStream(
+    buildColumnTypeMessages(req),
+    config,
+    (_c, total) => { accumulated = total; callbacks.onPartial?.(accumulated); },
+    (full) => callbacks.onDone(tryParseColumnTypeJson(full)),
+    callbacks.onError
+  );
+}

@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>按钮参考 · DeepSeek Excel Assistant</title>
+  <link rel="stylesheet" href="../shared.css" />
+</head>
+<body>
+  <h1>🎛️ 按钮参考</h1>
+  <p>本插件在 Ribbon 自定义选项卡 <strong>DeepSeek</strong> 下提供 13 个按钮，覆盖 6 个分组。所有写入操作都是两步模式（AI 建议 → 用户确认 Apply）。</p>
+
+  <h2>分组 1：AI 助手</h2>
+  <table>
+    <tr><th>按钮</th><th>说明</th></tr>
+    <tr><td>📊 <strong>Excel 上下文</strong></td><td>抓取当前选区（地址 + 表头 + 样例），写入对话上下文。</td></tr>
+    <tr><td>🧹 <strong>PII 脱敏</strong></td><td>扫描选区里的身份证/手机/邮箱/银行卡号，AI 给出脱敏建议。</td></tr>
+    <tr><td>🔧 <strong>代码生成</strong></td><td>把选中的公式转换成 VBA 或 Office Scripts。</td></tr>
+    <tr><td>📈 <strong>图表推荐</strong></td><td>基于选区数据推荐 3 种最合适的图表。</td></tr>
+  </table>
+
+  <h2>分组 2：公式与数据</h2>
+  <table>
+    <tr><th>按钮</th><th>说明</th></tr>
+    <tr><td>📝 <strong>公式解释</strong></td><td>把选中的公式逐段拆解，说明每部分作用。</td></tr>
+    <tr><td>🔍 <strong>公式诊断</strong></td><td>扫描选区里的公式错误（#REF! #DIV/0! 等），AI 给出修复建议。</td></tr>
+    <tr><td>🛠 <strong>修复公式</strong></td><td>一键把诊断建议应用到选中的错误公式上。</td></tr>
+  </table>
+
+  <h2>分组 3：可视化与代码</h2>
+  <table>
+    <tr><th>按钮</th><th>说明</th></tr>
+    <tr><td>📐 <strong>代码格式化</strong></td><td>对选中的 VBA / 公式进行格式化重排。</td></tr>
+  </table>
+
+  <h2>分组 4：数据保护</h2>
+  <table>
+    <tr><th>按钮</th><th>说明</th></tr>
+    <tr><td>🔒 <strong>脱敏写入</strong></td><td>把选中的敏感值替换为脱敏值并写入原单元格。</td></tr>
+  </table>
+
+  <h2>分组 5：AI 分析（Phase 4）</h2>
+  <table>
+    <tr><th>按钮</th><th>说明</th></tr>
+    <tr><td>🟩 <strong>相关性矩阵</strong></td><td>计算所有数值列的 Pearson 相关性，写入 NxN 热力图（带条件格式）。</td></tr>
+    <tr><td>🟥 <strong>异常值检测</strong></td><td>用 z-score 方法扫描数值列，高亮异常单元格。</td></tr>
+    <tr><td>🧮 <strong>AI 透视表</strong></td><td>基于数据特征，AI 推荐 rows / columns / values 布局，确认后一键创建 PivotTable。</td></tr>
+  </table>
+
+  <h2>分组 6：报表与数据（Phase 4）</h2>
+  <table>
+    <tr><th>按钮</th><th>说明</th></tr>
+    <tr><td>📝 <strong>快速报告</strong></td><td>对选中数据生成结构化报告（标题/摘要/章节/建议），写入新工作表。</td></tr>
+    <tr><td>🏷️ <strong>列类型推断</strong></td><td>推断每列类型（数字/日期/分类/货币/百分比），Apply 后加表头样式 + 命名范围 + 数字格式。</td></tr>
+  </table>
+
+  <h2>任务窗格里的图标</h2>
+  <table>
+    <tr><th>图标</th><th>动作</th></tr>
+    <tr><td>📊</td><td>把 Excel 选区数据拼到输入框（上下文注入）</td></tr>
+    <tr><td>📌</td><td>把当前 AI 回复插入到活动单元格</td></tr>
+    <tr><td>📋</td><td>复制 AI 回复到剪贴板</td></tr>
+    <tr><td>🔄</td><td>重新生成最后一条 AI 回复</td></tr>
+    <tr><td>🔀</td><td>从这条消息分出新分支（重新生成）</td></tr>
+  </table>
+
+  <div class="help-pager">
+    <a class="prev" href="guide.html">← 用户指南</a>
+    <a class="next" href="faq.html">常见问题 →</a>
+  </div>
+</body>
+</html>

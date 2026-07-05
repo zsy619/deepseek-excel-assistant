@@ -40,7 +40,14 @@ type CommandId =
   | "multiSelectionAnalyze"
   | "openKnowledgeBase"
   | "shareSession"
-  | "usageDashboard";
+  | "usageDashboard"
+  | "showTaskpaneFocus"
+  | "correlationMatrix"
+  | "detectOutliers"
+  | "createPivot"
+  | "quickReport"
+  | "inferColumnTypes"
+  | "openHelp";
 
 interface CommandEnvelope {
   id: string;
@@ -159,6 +166,13 @@ function confirmClick(command: CommandId): void {
     openKnowledgeBase: "知识库",
     shareSession: "分享会话",
     usageDashboard: "用量看板",
+    correlationMatrix: "相关性矩阵",
+    detectOutliers: "异常值检测",
+    createPivot: "AI 透视表",
+    quickReport: "快速报告",
+    inferColumnTypes: "列类型推断",
+    openHelp: "帮助文档",
+    showTaskpaneFocus: "任务窗格聚焦",
   };
   try {
     const ui = (Office as any)?.context?.ui;
@@ -191,7 +205,41 @@ function done(event: Office.AddinCommands.Event): void {
 }
 
 export function showTaskpane(event: Office.AddinCommands.Event): void {
+  // 1. Always (re)show the taskpane - on LTSC 2024 Mac this is the only
+  //    API that brings the panel to the foreground.
   try { Office.addin.showAsTaskpane(); } catch { /* noop */ }
+  // 2. Also broadcast a "focus" envelope so the taskpane, if already
+  //    open, will scroll to the chat input and flash a brief banner.
+  //    Without this the click on a ribbon tab feels like a no-op when
+  //    the panel is already visible.
+  try {
+    const env: CommandEnvelope = {
+      id: "showTaskpane-" + Date.now().toString(36),
+      type: "deepseek:command",
+      command: "showTaskpaneFocus",
+      payload: null,
+      t: Date.now(),
+      via: "showTaskpane",
+    };
+    // Best-effort dispatch via BroadcastChannel + localStorage + postMessage.
+    try {
+      if (typeof BroadcastChannel === "function") {
+        const ch = new BroadcastChannel(CHANNEL_NAME);
+        ch.postMessage(env);
+        ch.close();
+      }
+    } catch { /* noop */ }
+    try {
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(env));
+      }
+    } catch { /* noop */ }
+    try {
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage(env, "*");
+      }
+    } catch { /* noop */ }
+  } catch { /* noop */ }
   done(event);
 }
 
@@ -291,6 +339,42 @@ export function usageDashboard(event: Office.AddinCommands.Event): void {
   done(event);
 }
 
+export function openHelp(event: Office.AddinCommands.Event): void {
+  confirmClick("openHelp");
+  dispatch("openHelp");
+  done(event);
+}
+
+export function correlationMatrix(event: Office.AddinCommands.Event): void {
+  confirmClick("correlationMatrix");
+  dispatch("correlationMatrix");
+  done(event);
+}
+
+export function detectOutliers(event: Office.AddinCommands.Event): void {
+  confirmClick("detectOutliers");
+  dispatch("detectOutliers");
+  done(event);
+}
+
+export function createPivot(event: Office.AddinCommands.Event): void {
+  confirmClick("createPivot");
+  dispatch("createPivot");
+  done(event);
+}
+
+export function quickReport(event: Office.AddinCommands.Event): void {
+  confirmClick("quickReport");
+  dispatch("quickReport");
+  done(event);
+}
+
+export function inferColumnTypes(event: Office.AddinCommands.Event): void {
+  confirmClick("inferColumnTypes");
+  dispatch("inferColumnTypes");
+  done(event);
+}
+
 /* ----------------------------------------------------------------- */
 /* Expose handlers on the global scope.                               */
 /* ----------------------------------------------------------------- */
@@ -314,6 +398,11 @@ declare global {
     openKnowledgeBase?: (event: Office.AddinCommands.Event) => void;
     shareSession?: (event: Office.AddinCommands.Event) => void;
     usageDashboard?: (event: Office.AddinCommands.Event) => void;
+    correlationMatrix?: (event: Office.AddinCommands.Event) => void;
+    detectOutliers?: (event: Office.AddinCommands.Event) => void;
+    createPivot?: (event: Office.AddinCommands.Event) => void;
+    quickReport?: (event: Office.AddinCommands.Event) => void;
+    inferColumnTypes?: (event: Office.AddinCommands.Event) => void;
   }
 }
 
@@ -334,6 +423,12 @@ window.multiSelectionAnalyze = multiSelectionAnalyze;
 window.openKnowledgeBase = openKnowledgeBase;
 window.shareSession = shareSession;
 window.usageDashboard = usageDashboard;
+window.correlationMatrix = correlationMatrix;
+window.detectOutliers = detectOutliers;
+window.createPivot = createPivot;
+window.quickReport = quickReport;
+window.inferColumnTypes = inferColumnTypes;
+window.openHelp = openHelp;
 
 try { console.info("[DeepSeek] commands.js loaded - handlers registered"); } catch {}
 

@@ -12,8 +12,18 @@
  */
 
 import type { ChatMessage as ChatMessageType } from "../types";
-import { renderMarkdown, markdownToPlainText, renderMermaidDiagrams } from "./MarkdownRenderer";
+import { markdownToPlainText } from "../utils/markdownText";
 import { copyToClipboard, escapeHtml, formatRelativeTime } from "../utils/helpers";
+
+/** Lazy-loaded MarkdownRenderer (pulls in marked + highlight.js + 9 language
+ *  modules). Loaded on first assistant message render; cached for reuse. */
+let markdownRendererPromise: Promise<typeof import("./MarkdownRenderer")> | null = null;
+function loadMarkdownRenderer(): Promise<typeof import("./MarkdownRenderer")> {
+  if (!markdownRendererPromise) {
+    markdownRendererPromise = import("./MarkdownRenderer");
+  }
+  return markdownRendererPromise;
+}
 
 export class ChatMessageView {
   /** Root element of this message bubble. */
@@ -75,9 +85,18 @@ export class ChatMessageView {
     // Body content differs by role.
     let bodyHtml: string;
     if (isAssistant) {
-      bodyHtml = renderMarkdown(this.message.content || "");
       if (this.streaming) {
-        bodyHtml += '<span class="md-cursor">▍</span>';
+        // While streaming, show raw text with a cursor. Markdown rendering
+        // only happens once the stream is complete (see upgradeMarkdown).
+        bodyHtml =
+          `<div class="user-text">${escapeHtml(this.message.content || "")}<span class="md-cursor">▍</span></div>`;
+      } else {
+        // First paint: render plain text immediately so the bubble appears
+        // without waiting on the marked + highlight.js async chunk.
+        // upgradeMarkdown() below replaces this with the full rendered HTML
+        // once the lazy chunk is in memory.
+        bodyHtml = `<div class="user-text">${escapeHtml(this.message.content || "")}</div>`;
+        this.upgradeMarkdown();
       }
     } else if (isSystem) {
       bodyHtml = `<pre class="system-prompt">${escapeHtml(this.message.content)}</pre>`;
@@ -127,9 +146,35 @@ export class ChatMessageView {
     // Mermaid blocks are placeholders until the library renders them
     // asynchronously. Kick that off after mount; errors are surfaced
     // inline so the user still sees the source.
-    if (isAssistant) {
-      void renderMermaidDiagrams(this.element);
+    if (isAssistant && !this.streaming) {
+      // Handled inside upgradeMarkdown() — it owns the full lazy render
+      // (marked + hljs + mermaid) so we only fetch the chunk once.
+      return;
     }
+  }
+
+  /** Async post-render step: fetch the markdown chunk (marked + hljs + 9 lang
+   *  modules) and replace the plain-text body with rendered markdown, then
+   *  run mermaid on the placeholders. No-op if content is empty or the
+   *  message has since been re-rendered into streaming state. */
+  private upgradeMarkdown(): void {
+    const self = this;
+    void loadMarkdownRenderer().then((mod) => {
+      // Bail out if the message is gone, content changed, or the bubble
+      // has been recycled for a streaming update mid-fetch.
+      const contentEl = self.element.querySelector(".msg-content");
+      if (!contentEl || !self.message.content) return;
+      try {
+        const html = mod.renderMarkdown(self.message.content);
+        contentEl.innerHTML = html;
+        // Re-wire the copy buttons on code blocks.
+        self.attachCodeCopyHandlers();
+        // Mermaid blocks are placeholders inside the rendered HTML.
+        void mod.renderMermaidDiagrams(self.element);
+      } catch {
+        /* keep the plain-text fallback */
+      }
+    });
   }
 
   private renderActions(): string {
@@ -144,7 +189,24 @@ export class ChatMessageView {
   }
 
   private attachHandlers(): void {
-    // Copy code button inside markdown code blocks
+    // Copy code button inside markdown code blocks (initial paint).
+    this.attachCodeCopyHandlers();
+
+    // Top-level actions on assistant messages
+    const actionBtns = this.element.querySelectorAll<HTMLButtonElement>(".msg-action-btn");
+    actionBtns.forEach((btn) => {
+      btn.onclick = (ev) => {
+        ev.stopPropagation();
+        const action = btn.dataset.action;
+        this.dispatchAction(action || "");
+      };
+    });
+  }
+
+  /** Wire up the copy buttons inside markdown code blocks. Called both on
+   *  initial render (for streamed messages where chunks of markdown may
+   *  already be rendered) and after upgradeMarkdown() replaces the body. */
+  private attachCodeCopyHandlers(): void {
     const copyBtns = this.element.querySelectorAll<HTMLButtonElement>(".md-copy-btn");
     copyBtns.forEach((btn) => {
       btn.onclick = async (ev) => {
@@ -159,16 +221,6 @@ export class ChatMessageView {
         })();
         const ok = await copyToClipboard(decoded);
         flashBtn(btn, ok ? "已复制" : "失败");
-      };
-    });
-
-    // Top-level actions on assistant messages
-    const actionBtns = this.element.querySelectorAll<HTMLButtonElement>(".msg-action-btn");
-    actionBtns.forEach((btn) => {
-      btn.onclick = (ev) => {
-        ev.stopPropagation();
-        const action = btn.dataset.action;
-        this.dispatchAction(action || "");
       };
     });
   }

@@ -19,7 +19,7 @@ import {
   mountQuickActions,
   type QuickActionKind,
 } from "./QuickActions";
-import { markdownToPlainText } from "./MarkdownRenderer";
+import { markdownToPlainText } from "../utils/markdownText";
 import { chatCompletionStream, describeApiError, diagnoseFormulasStream, translateToScript, recommendChartStream, type FormulaDiagnosis, type ScriptFlavor } from "../services/deepseek";
 import { getSelectedData, getRangeFormula, insertTextToCell, writeFormula, writeRange, detectFormula, scanFormulaErrors, fixFormulaAt, collectFormulasForCode, getSelectedRangeInfo, insertChart, scanSelectionForPII, batchReplaceCells, readMultiSelection, type FormulaScanResult } from "../services/excel";
 import { excelEvents } from "../services/excel-events";
@@ -31,6 +31,18 @@ import { PromptMenuView, type PromptMenuSelectDetail } from "./PromptMenu";
 import { CodeGenPanelView, type CodeGenCopyDetail, type CodeGenRetryDetail } from "./CodeGenPanel";
 import { ChartPickerView, type ChartPickerInsertDetail } from "./ChartPicker";
 import { PiiMaskerView, type PiiMaskerApplyDetail } from "./PiiMasker";
+// Type-only imports — the 5 panel classes live in their own modules and are
+// loaded on-demand through phase4Panels. We never reference them at runtime
+// from this file, so `import type` keeps them out of the main bundle while
+// preserving strong typing for the Phase4Panels record below.
+import type { CorrelationMatrixPanel } from "./CorrelationMatrixPanel";
+import type { OutlierPanel } from "./OutlierPanel";
+import type { PivotBuilderPanel } from "./PivotBuilderPanel";
+import type { ReportBuilderPanel } from "./ReportBuilderPanel";
+import type { ColumnTypePanel } from "./ColumnTypePanel";
+import type { Phase4Panels } from "./phase4Panels";
+import { RibbonBanner } from "./RibbonBanner";
+import { RibbonFocusController, panelForCommand, type PanelName } from "./RibbonFocusController";
 import { excelValuesToMarkdown, generateId, deriveSessionTitle, estimateTokens, formatTokens, escapeHtml } from "../utils/helpers";
 import { BranchController } from "../controllers/BranchController";
 import { ToolCallController, type ToolCallDispatcher } from "../controllers/ToolCallController";
@@ -107,6 +119,12 @@ export class ChatWindow implements ChatControllerHub {
   /** In-flight translateToScript abort controller. */
   private codeGenAbort: AbortController | null = null;
 
+  /** Top-of-taskpane status banner shown while a ribbon command is in flight. */
+  public ribbonBanner: RibbonBanner = new RibbonBanner();
+
+  /** Scroll/highlight controller for ribbon commands. */
+  public ribbonFocus: RibbonFocusController = new RibbonFocusController();
+
   /** Abort for the chart recommender stream. */
   private chartAbort: AbortController | null = null;
 
@@ -117,6 +135,41 @@ export class ChatWindow implements ChatControllerHub {
 
   /** PII masker panel (PRD-06) - shows detected sensitive values. */
   private piiMasker!: PiiMaskerView;
+
+  /** Lazy-loaded bundle of 5 advanced-analysis panels (Phase 4). Fetched on
+   *  first Phase-4 ribbon click; webpack splits this into its own async
+   *  chunk so the 5 panel classes + their mount logic stay out of main. */
+  private _phase4Panels: Phase4Panels | null = null;
+  private _phase4PanelsPromise: Promise<Phase4Panels> | null = null;
+  private async ensurePhase4Panels(): Promise<Phase4Panels> {
+    if (this._phase4Panels) return this._phase4Panels;
+    if (!this._phase4PanelsPromise) {
+      this._phase4PanelsPromise = (async () => {
+        const mod = await import("./phase4Panels");
+        const panels = mod.mountPhase4Panels(this.root, {
+          onCorrelationClick: (ev) => this.handleCorrelationClick(ev),
+          onOutlierClick: (ev) => this.handleOutlierClick(ev),
+          onPivotClick: (ev) => this.handlePivotClick(ev),
+          onReportClick: (ev) => this.handleReportClick(ev),
+          onColumnTypeClick: (ev) => this.handleColumnTypeClick(ev),
+        });
+        this._phase4Panels = panels;
+        return panels;
+      })();
+    }
+    return this._phase4PanelsPromise;
+  }
+
+  /** Lazy-loaded bundle of the 5 advanced ribbon actions (5 streams + 5
+   *  Apply functions). Fetched on first advanced-ribbon click; webpack
+   *  splits this into its own async chunk so the main bundle stays small. */
+  private ribbonActionsPromise: Promise<typeof import("../ribbonActions")> | null = null;
+  private async loadRibbonActions(): Promise<typeof import("../ribbonActions")> {
+    if (!this.ribbonActionsPromise) {
+      this.ribbonActionsPromise = import("../ribbonActions");
+    }
+    return this.ribbonActionsPromise;
+  }
 
   /** Per-feature controllers (Wave 3 refactor). */
   private branchController!: BranchController;
@@ -303,9 +356,9 @@ export class ChatWindow implements ChatControllerHub {
         <button type="button" class="chat-header-btn" data-action="toggleSettings" title="设置">⚙️</button>
       </header>
 
-      <div data-ref="contextBar" class="chat-context-mount"></div>
+      <div data-ref="contextBar" data-panel="contextBar" class="chat-context-mount"></div>
 
-      <div class="chat-list" data-ref="list">
+      <div class="chat-list" data-ref="list" data-panel="chat">
         <div class="chat-empty">
           <div class="chat-empty-icon">💬</div>
           <h3>开始你的第一次对话</h3>
@@ -342,13 +395,23 @@ export class ChatWindow implements ChatControllerHub {
 
       <div data-ref="promptMenu" class="prompt-menu-mount"></div>
 
-      <div data-ref="formulaLibrary" class="chat-formula-mount"></div>
+      <div data-ref="formulaLibrary" data-panel="formulaLibrary" class="chat-formula-mount"></div>
 
-      <div data-ref="codeGen" class="chat-codegen-mount"></div>
+      <div data-ref="codeGen" data-panel="codeGen" class="chat-codegen-mount"></div>
 
-      <div data-ref="chartPicker" class="chat-chartpicker-mount"></div>
+      <div data-ref="chartPicker" data-panel="chartPicker" class="chat-chartpicker-mount"></div>
 
-      <div data-ref="piiMasker" class="chat-pii-mount"></div>
+      <div data-ref="piiMasker" data-panel="piiMasker" class="chat-pii-mount"></div>
+
+      <div data-ref="correlationPanel" data-panel="correlationMatrix" class="chat-corrpanel-mount"></div>
+
+      <div data-ref="outlierPanel" data-panel="outlierPanel" class="chat-outlierpanel-mount"></div>
+
+      <div data-ref="pivotPanel" data-panel="pivotBuilder" class="chat-pivotpanel-mount"></div>
+
+      <div data-ref="reportPanel" data-panel="reportBuilder" class="chat-reportpanel-mount"></div>
+
+      <div data-ref="colTypePanel" data-panel="columnTypes" class="chat-coltypepanel-mount"></div>
 
       <div class="chat-footer">
         <span class="chat-word-count" data-ref="wordCount">0 字</span>
@@ -412,6 +475,10 @@ export class ChatWindow implements ChatControllerHub {
       const e = ev as CustomEvent<PiiMaskerApplyDetail>;
       await this.applyPiiReplacements(e.detail.updates);
     });
+
+    // The 5 advanced-analysis panels (Phase 4) are mounted lazily on the
+    // first ribbon click via ensurePhase4Panels() — see phase4Panels.ts.
+    // Their mount points are reserved in renderShell() (data-ref="...").
 
     // Per-feature controllers (Wave 3 refactor). Each takes `this` as the
     // hub dependency; they don't reach back into ChatWindow internals.
@@ -702,6 +769,34 @@ export class ChatWindow implements ChatControllerHub {
   /** Public accessor for the latest cached selection. */
   public getCachedSelection(): ExcelSelection | null {
     return this.currentSelection;
+  }
+
+  /**
+   * Pre-fill the chat input with the given text and focus it. Used by
+   * ribbon commands that want to show the user a draft prompt before
+   * sending (e.g. "选中分析" - Q3=A: chat prompt already filled).
+   */
+  public prefillInput(text: string): void {
+    this.inputEl.value = text;
+    this.updateWordCount();
+    try {
+      this.inputEl.focus({ preventScroll: true });
+      // Move cursor to end of text so the user can edit naturally.
+      const len = text.length;
+      try {
+        this.inputEl.setSelectionRange(len, len);
+      } catch {
+        /* noop */
+      }
+      // Smooth-scroll input into view in case the taskpane is tall.
+      try {
+        this.inputEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      } catch {
+        /* noop */
+      }
+    } catch {
+      /* noop */
+    }
   }
 
   /** Triggered by the ribbon "generate formula" command. Opens the
@@ -1107,6 +1202,474 @@ export class ChatWindow implements ChatControllerHub {
     } catch (err: any) {
       this.showError(err?.message || "替换失败");
     }
+  }
+
+  /* =====================================================================
+   * Phase 4 — Advanced ribbon handlers
+   * Each handler shows its dedicated panel and seeds it with a placeholder
+   * payload. The AI completion path is stubbed for now (the panel still
+   * renders correctly so verifyRibbon can confirm the wiring).
+   * ===================================================================== */
+
+  /** Ribbon "相关性矩阵" — reads numeric columns, shows the heat-map panel. */
+  public async runCorrelationMatrix(): Promise<void> {
+    const sel = await this.fetchSelectionOrToast();
+    if (!sel) return;
+    const headers = sel.headers.length ? sel.headers : sel.values[0]?.map((_, i) => `Col${i + 1}`) || [];
+    const samples = this.buildSampleRecords(sel.values, headers);
+    const panels = await this.ensurePhase4Panels();
+    panels.correlation.show({
+      selection: sel.address,
+      reasoning: "AI 计算中…",
+    });
+    try {
+      const { correlationStream } = await this.loadRibbonActions();
+      await correlationStream(
+        { selection: sel.address, headers, samples },
+        this.deps.getConfig(),
+        {
+          onPartial: () => this.ribbonBanner.update?.("相关性矩阵 · AI 计算中…"),
+          onDone: (r) => {
+            const cells = r.cells || [];
+            const labels = r.labels?.length ? r.labels : headers;
+            panels.correlation.show({
+              selection: sel.address,
+              matrix: { labels, cells },
+              reasoning: r.reasoning || "",
+            });
+            this.toast(`已计算 ${labels.length}×${labels.length} 相关性矩阵`, "success");
+          },
+          onError: (err) => this.showError(err?.message || "AI 失败"),
+        }
+      );
+    } catch (err: any) {
+      this.showError(err?.message || "启动失败");
+    }
+  }
+
+  /** Ribbon "异常值" — scans selected numeric range, shows outlier panel. */
+  public async runDetectOutliers(): Promise<void> {
+    const sel = await this.fetchSelectionOrToast();
+    if (!sel) return;
+    const headers = sel.headers.length ? sel.headers : [];
+    const samples = this.buildSampleRecords(sel.values, headers);
+    const panels = await this.ensurePhase4Panels();
+    panels.outlier.show({
+      selection: sel.address,
+      method: "zscore",
+      outliers: [],
+      summary: "AI 扫描中…",
+    });
+    try {
+      const { outlierStream } = await this.loadRibbonActions();
+      await outlierStream(
+        { selection: sel.address, headers, samples, method: "zscore" },
+        this.deps.getConfig(),
+        {
+          onPartial: () => this.ribbonBanner.update?.("异常值 · AI 扫描中…"),
+          onDone: (r) => {
+            panels.outlier.show({
+              selection: sel.address,
+              method: r.method || "zscore",
+              outliers: r.outliers || [],
+              summary: r.summary || "",
+            });
+            this.toast(`检测到 ${r.outliers?.length || 0} 个异常值`, "info");
+          },
+          onError: (err) => this.showError(err?.message || "AI 失败"),
+        }
+      );
+    } catch (err: any) {
+      this.showError(err?.message || "启动失败");
+    }
+  }
+
+  /** Ribbon "AI 透视表" — proposes a pivot spec, shows preview panel. */
+  public async runCreatePivot(): Promise<void> {
+    const sel = await this.fetchSelectionOrToast();
+    if (!sel) return;
+    const headers = sel.headers.length ? sel.headers : [];
+    const samples = this.buildSampleRecords(sel.values, headers);
+    const panels = await this.ensurePhase4Panels();
+    panels.pivot.show({
+      selection: sel.address,
+      rationale: "AI 推荐中…",
+    });
+    try {
+      const { pivotSpecStream } = await this.loadRibbonActions();
+      await pivotSpecStream(
+        { selection: sel.address, headers, samples },
+        this.deps.getConfig(),
+        {
+          onPartial: () => this.ribbonBanner.update?.("透视表 · AI 推荐中…"),
+          onDone: (r) => {
+            panels.pivot.show({
+              selection: sel.address,
+              spec: {
+                rows: r.rows || [],
+                columns: r.columns || [],
+                values: r.values || [],
+              },
+              rationale: r.rationale || "",
+            });
+            this.toast("AI 已推荐透视表布局,可在面板中确认", "success");
+          },
+          onError: (err) => this.showError(err?.message || "AI 失败"),
+        }
+      );
+    } catch (err: any) {
+      this.showError(err?.message || "启动失败");
+    }
+  }
+
+  /** Ribbon "快速报告" — generates a structured report, shows panel. */
+  public async runQuickReport(): Promise<void> {
+    const sel = await this.fetchSelectionOrToast();
+    if (!sel) return;
+    const headers = sel.headers.length ? sel.headers : [];
+    const samples = this.buildSampleRecords(sel.values, headers);
+    const panels = await this.ensurePhase4Panels();
+    panels.report.show({
+      selection: sel.address,
+      title: "数据报告",
+      summary: "AI 生成中…",
+    });
+    try {
+      const { reportStream } = await this.loadRibbonActions();
+      await reportStream(
+        {
+          selection: sel.address,
+          headers,
+          rowCount: sel.rowCount,
+          columnCount: sel.columnCount,
+          samples,
+        },
+        this.deps.getConfig(),
+        {
+          onPartial: () => this.ribbonBanner.update?.("报告 · AI 生成中…"),
+          onDone: (r) => {
+            panels.report.show({
+              selection: sel.address,
+              title: r.title,
+              summary: r.summary,
+              sections: r.sections || [],
+              recommendations: r.recommendations || [],
+            });
+            this.toast("报告草稿已生成", "success");
+          },
+          onError: (err) => this.showError(err?.message || "AI 失败"),
+        }
+      );
+    } catch (err: any) {
+      this.showError(err?.message || "启动失败");
+    }
+  }
+
+  /** Ribbon "列类型" — infers types per column, shows panel. */
+  public async runInferColumnTypes(): Promise<void> {
+    const sel = await this.fetchSelectionOrToast();
+    if (!sel) return;
+    const headers = sel.headers.length ? sel.headers : [];
+    const samples = this.buildSampleRecords(sel.values, headers);
+    const panels = await this.ensurePhase4Panels();
+    panels.colType.show({
+      selection: sel.address,
+      rows: [],
+      summary: "AI 推断中…",
+    });
+    try {
+      const { columnTypeStream } = await this.loadRibbonActions();
+      await columnTypeStream(
+        { selection: sel.address, headers, samples },
+        this.deps.getConfig(),
+        {
+          onPartial: () => this.ribbonBanner.update?.("列类型 · AI 推断中…"),
+          onDone: (r) => {
+            const rows = (r.rows || []).map((row) => ({
+              column: row.column,
+              proposedType: row.proposedType,
+              confidence: row.confidence,
+              format: row.format,
+              namedRange: row.namedRange || `col_${row.column.replace(/[^A-Za-z0-9_]/g, "_")}`,
+              reason: row.reason,
+            }));
+            panels.colType.show({
+              selection: sel.address,
+              rows,
+              summary: r.summary || `检测到 ${rows.length} 列`,
+            });
+            this.toast(`已推断 ${rows.length} 列类型`, "success");
+          },
+          onError: (err) => this.showError(err?.message || "AI 失败"),
+        }
+      );
+    } catch (err: any) {
+      this.showError(err?.message || "启动失败");
+    }
+  }
+
+  /** Read the current selection (headers + values) or toast an error and
+   *  return null. Shared by all 5 advanced-panel ribbon handlers. */
+  private async fetchSelectionOrToast(): Promise<{
+    address: string;
+    headers: string[];
+    values: any[][];
+    rowCount: number;
+    columnCount: number;
+  } | null> {
+    let info;
+    try {
+      info = await getSelectedRangeInfo();
+    } catch (err: any) {
+      this.showError(err?.message || "无法读取选区");
+      return null;
+    }
+    if (!info) {
+      this.toast("请先选中数据", "info");
+      return null;
+    }
+    if (info.columnCount < 2) {
+      this.toast("至少需要 2 列数据", "info");
+      return null;
+    }
+    let values: any[][] = [];
+    try {
+      const sel = await getSelectedData();
+      values = (sel && sel.values) || [];
+    } catch {
+      values = [];
+    }
+    return {
+      address: info.address,
+      headers: info.headers || [],
+      values,
+      rowCount: info.rowCount,
+      columnCount: info.columnCount,
+    };
+  }
+
+  /** Convert a 2D array of values + a header row into an array of
+   *  objects keyed by header name (the shape our AI requests expect). */
+  private buildSampleRecords(
+    values: any[][],
+    headers: string[]
+  ): Array<Record<string, string | number | null>> {
+    if (!values || values.length === 0) return [];
+    const hasHeaderRow =
+      headers.length > 0 && headers.length === values[0].length;
+    const rows = hasHeaderRow ? values.slice(1) : values;
+    const out: Array<Record<string, string | number | null>> = [];
+    for (const row of rows.slice(0, 30)) {
+      const obj: Record<string, string | number | null> = {};
+      for (let i = 0; i < row.length; i++) {
+        const k = hasHeaderRow ? headers[i] : `c${i}`;
+        const v = row[i];
+        obj[k] = typeof v === "number" || typeof v === "string" ? v : v == null ? null : String(v);
+      }
+      out.push(obj);
+    }
+    return out;
+  }
+
+  /* =====================================================================
+   * Phase 4 — Apply/Copy click handlers
+   * Each method is wired to the corresponding panel's root element via
+   * delegated click listeners mounted in collectRefs.
+   * ===================================================================== */
+
+  private async handleCorrelationClick(ev: MouseEvent): Promise<void> {
+    const target = ev.target as HTMLElement;
+    if (!target.classList.contains("corr-panel__btn")) return;
+    const panels = await this.ensurePhase4Panels();
+    const payload = panels.correlation.getCurrentPayload();
+    if (!payload || !payload.matrix) return;
+    if (target.classList.contains("corr-panel__btn--apply")) {
+      try {
+        // Default: write to the cell two columns to the right of the source.
+        const start = this.computeNextFreeAddress(payload.selection) || "H1";
+        const { insertCorrelationMatrix } = await this.loadRibbonActions();
+        const msg = await insertCorrelationMatrix(
+          payload.matrix.labels,
+          payload.matrix.cells,
+          start
+        );
+        this.toast(msg, "success");
+      } catch (err: any) {
+        this.showError(err?.message || "插入失败");
+      }
+    } else if (target.classList.contains("corr-panel__btn--copy")) {
+      const text = JSON.stringify(payload.matrix, null, 2);
+      await navigator.clipboard?.writeText(text).catch(() => undefined);
+      this.toast("已复制相关性矩阵 JSON 到剪贴板", "info");
+    }
+  }
+
+  private async handleOutlierClick(ev: MouseEvent): Promise<void> {
+    const target = ev.target as HTMLElement;
+    if (!target.classList.contains("outlier-panel__btn")) return;
+    const panels = await this.ensurePhase4Panels();
+    const payload = panels.outlier.getCurrentPayload();
+    if (!payload || !payload.outliers) return;
+    if (target.classList.contains("outlier-panel__btn--highlight")) {
+      try {
+        const refs = payload.outliers.map((o) => ({ rowIndex: o.rowIndex, column: o.column }));
+        const base = this.parseAddress(payload.selection);
+        const { highlightOutliers } = await this.loadRibbonActions();
+        const n = await highlightOutliers(refs, base ?? undefined);
+        this.toast(`已高亮 ${n} 个异常单元格`, "success");
+      } catch (err: any) {
+        this.showError(err?.message || "高亮失败");
+      }
+    } else if (target.classList.contains("outlier-panel__btn--delete")) {
+      this.toast("删除行功能:待接入(优先高亮)", "info");
+    }
+  }
+
+  private async handlePivotClick(ev: MouseEvent): Promise<void> {
+    const target = ev.target as HTMLElement;
+    if (!target.classList.contains("pivot-panel__btn")) return;
+    const panels = await this.ensurePhase4Panels();
+    const payload = panels.pivot.getCurrentPayload();
+    if (!payload || !payload.spec || !payload.selection) return;
+    if (target.classList.contains("pivot-panel__btn--apply")) {
+      try {
+        const sheetName = `透视_${Date.now().toString(36).slice(-4)}`;
+        const { createPivotTable } = await this.loadRibbonActions();
+        const msg = await createPivotTable(payload.selection, sheetName, payload.spec);
+        this.toast(msg, "success");
+      } catch (err: any) {
+        this.showError(err?.message || "创建透视表失败");
+      }
+    } else if (target.classList.contains("pivot-panel__btn--copy")) {
+      const text = JSON.stringify(payload.spec, null, 2);
+      await navigator.clipboard?.writeText(text).catch(() => undefined);
+      this.toast("已复制透视表配置 JSON", "info");
+    }
+  }
+
+  private async handleReportClick(ev: MouseEvent): Promise<void> {
+    const target = ev.target as HTMLElement;
+    if (!target.classList.contains("report-panel__btn")) return;
+    const panels = await this.ensurePhase4Panels();
+    const payload = panels.report.getCurrentPayload();
+    if (!payload) return;
+    if (target.classList.contains("report-panel__btn--apply")) {
+      try {
+        const { writeReportSheet } = await this.loadRibbonActions();
+        const msg = await writeReportSheet({
+          title: payload.title || "数据报告",
+          summary: payload.summary || "",
+          sections: payload.sections || [],
+          recommendations: payload.recommendations || [],
+        });
+        this.toast(msg, "success");
+      } catch (err: any) {
+        this.showError(err?.message || "写入报告失败");
+      }
+    } else if (target.classList.contains("report-panel__btn--copy")) {
+      const md = this.renderReportMarkdown(payload);
+      await navigator.clipboard?.writeText(md).catch(() => undefined);
+      this.toast("已复制 Markdown 到剪贴板", "info");
+    }
+  }
+
+  private async handleColumnTypeClick(ev: MouseEvent): Promise<void> {
+    const target = ev.target as HTMLElement;
+    if (!target.classList.contains("coltype-panel__btn")) return;
+    const panels = await this.ensurePhase4Panels();
+    const payload = panels.colType.getCurrentPayload();
+    if (!payload || !payload.rows) return;
+    if (target.classList.contains("coltype-panel__btn--apply")) {
+      try {
+        const base = this.parseAddress(payload.selection);
+        if (!base) {
+          this.toast("无法解析选区,跳过格式应用", "info");
+          return;
+        }
+        const { applyColumnFormatting } = await this.loadRibbonActions();
+        const msg = await applyColumnFormatting(
+          base,
+          payload.rows.length,
+          payload.rows.map((r) => ({
+            column: r.column,
+            proposedType: r.proposedType,
+            confidence: r.confidence,
+            format: r.format,
+            namedRange: r.namedRange,
+          }))
+        );
+        this.toast(msg, "success");
+      } catch (err: any) {
+        this.showError(err?.message || "应用格式失败");
+      }
+    } else if (target.classList.contains("coltype-panel__btn--copy")) {
+      const text = JSON.stringify(payload.rows, null, 2);
+      await navigator.clipboard?.writeText(text).catch(() => undefined);
+      this.toast("已复制列类型配置 JSON", "info");
+    }
+  }
+
+  /** Parse "Sheet!A1:D10" or "A1:D10" into a base {sheet, rowStart, columnStart}. */
+  private parseAddress(addr?: string): { sheet: string; rowStart: number; columnStart: number } | null {
+    if (!addr) return null;
+    const bang = addr.indexOf("!");
+    const sheet = bang >= 0 ? addr.slice(0, bang) : "";
+    const a = (bang >= 0 ? addr.slice(bang + 1) : addr).split(":")[0];
+    const m = /([A-Z]+)(\d+)/.exec(a);
+    if (!m) return null;
+    const colStart = this.letterToColIndex(m[1]);
+    return { sheet, rowStart: parseInt(m[2], 10), columnStart: colStart };
+  }
+
+  /** Convert column letter to 1-based column index (A→1, B→2, ..., Z→26, AA→27). */
+  private letterToColIndex(letters: string): number {
+    let n = 0;
+    for (let i = 0; i < letters.length; i++) {
+      n = n * 26 + (letters.charCodeAt(i) - 64);
+    }
+    return n;
+  }
+
+  /** Compute a free address 2 columns to the right of the source range
+   *  end. Used as the default insert target for the correlation matrix. */
+  private computeNextFreeAddress(addr?: string): string | null {
+    if (!addr) return null;
+    const bang = addr.indexOf("!");
+    const clean = bang >= 0 ? addr.slice(bang + 1) : addr;
+    const [start, end] = clean.split(":");
+    const last = end || start;
+    const m = /([A-Z]+)(\d+)/.exec(last);
+    if (!m) return null;
+    // Shift right by 2 columns from the last column of the source range.
+    const newCol = this.letterToColIndex(m[1]) + 2;
+    const newColLetters = this.colIndexToLetters(newCol);
+    const sheet = bang >= 0 ? addr.slice(0, bang + 1) : "";
+    return `${sheet}${newColLetters}1`;
+  }
+
+  private colIndexToLetters(idx: number): string {
+    let n = idx;
+    let s = "";
+    while (n > 0) {
+      const r = (n - 1) % 26;
+      s = String.fromCharCode(65 + r) + s;
+      n = Math.floor((n - 1) / 26);
+    }
+    return s;
+  }
+
+  private renderReportMarkdown(p: { title?: string; summary?: string; sections?: Array<{ heading: string; body: string }>; recommendations?: string[] }): string {
+    const lines: string[] = [];
+    lines.push(`# ${p.title || "数据报告"}`);
+    if (p.summary) lines.push("", p.summary);
+    for (const s of p.sections || []) {
+      lines.push("", `## ${s.heading}`, "", s.body);
+    }
+    if (p.recommendations && p.recommendations.length) {
+      lines.push("", "## 建议");
+      for (const r of p.recommendations) lines.push(`- ${r}`);
+    }
+    return lines.join("\n");
   }
 
   private updateWordCount(): void {

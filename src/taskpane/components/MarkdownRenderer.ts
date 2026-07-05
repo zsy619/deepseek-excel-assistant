@@ -132,29 +132,12 @@ export function renderMarkdown(input: string): string {
 }
 
 /** Strip markdown syntax and return plain text. Useful when "insert to cell"
- *  should drop formatting markers rather than carry them into Excel. */
-export function markdownToPlainText(input: string): string {
-  if (!input) return "";
-  return input
-    // fenced code blocks -> content
-    .replace(/```[a-zA-Z]*\n([\s\S]*?)```/g, "$1")
-    // inline code -> content
-    .replace(/`([^`]+)`/g, "$1")
-    // bold / italic
-    .replace(/\*\*([^*]+)\*\*/g, "$1")
-    .replace(/\*([^*]+)\*/g, "$1")
-    .replace(/__([^_]+)__/g, "$1")
-    .replace(/_([^_]+)_/g, "$1")
-    // links -> visible text
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-    // headings / blockquotes / lists markers
-    .replace(/^#+\s+/gm, "")
-    .replace(/^>\s?/gm, "")
-    .replace(/^[-*+]\s+/gm, "")
-    .replace(/^\d+\.\s+/gm, "")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
+ *  should drop formatting markers rather than carry them into Excel.
+ *
+ *  NOTE: this pure-regex version now lives in utils/markdownText.ts so the
+ *  context bar / insert-to-cell flow doesn't have to pull in marked + hljs.
+ *  It's re-exported here for callers that already import from this module. */
+export { markdownToPlainText } from "../utils/markdownText";
 
 /** Highlight.js instance for direct use when needed (e.g. raw text rendering). */
 export function highlightCode(text: string, language?: string): string {

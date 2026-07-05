@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>疑难排查 · DeepSeek Excel Assistant</title>
+  <link rel="stylesheet" href="../shared.css" />
+</head>
+<body>
+  <h1>🔧 疑难排查</h1>
+  <p>遇到问题时按下面的清单排查。90% 的问题能在前两节解决。</p>
+
+  <h2>1. 加载项未出现 / 任务窗格空白</h2>
+  <ul>
+    <li><strong>检查 manifest.xml 是否正确加载</strong>：<code>office-addin-manifest validate manifest.xml</code></li>
+    <li><strong>检查 WEF 扫描器</strong>：如果使用公司 Managed Installer，要求 <code>Version="1.0.0.0"</code> + <code>AID</code> + <code>SourceLocation</code> 必须严格匹配，三者缺一不可。</li>
+    <li><strong>检查 dev server</strong>：<code>npm start</code> 后确认 <code>https://localhost:3000/taskpane.html</code> 可访问。</li>
+    <li><strong>证书问题</strong>：<code>office-addin-dev-certs install</code> 重装证书。</li>
+  </ul>
+
+  <h2>2. "加载项错误" 弹窗</h2>
+  <p>通常是开发服务器没启，或端口被占用。</p>
+  <pre><code>lsof -i :3000
+# 杀掉占用进程:
+kill -9 &lt;PID&gt;
+# 重启:
+npm start</code></pre>
+
+  <h2>3. AI 请求失败</h2>
+
+  <h3>401 Unauthorized</h3>
+  <ul>
+    <li>检查 API Key 是否正确（前后空格、复制完整）。</li>
+    <li>检查端点 URL 是否对应你账户的模型提供方。</li>
+  </ul>
+
+  <h3>429 Too Many Requests</h3>
+  <ul>
+    <li>账户配额耗尽。登录 <code>platform.deepseek.com</code> 查看用量。</li>
+    <li>公司网关限流。换一个时段重试。</li>
+  </ul>
+
+  <h3>500 / 502 / 503 / 504</h3>
+  <ul>
+    <li>服务端临时故障。等几秒重试。</li>
+    <li>切换模型（chat → reasoner 或反向）。</li>
+  </ul>
+
+  <h3>Network Error / CORS</h3>
+  <ul>
+    <li>浏览器 CORS 拒绝。Office 加载项里的 fetch 通常允许跨域，但自建代理可能拦截 OPTIONS 预检。</li>
+    <li>公司代理需要把 <code>api.deepseek.com</code> 加入白名单。</li>
+  </ul>
+
+  <h2>4. Ribbon 按钮点击没反应</h2>
+  <ul>
+    <li>检查 <code>manifest.xml</code> 里 <code>FunctionFile</code> 是否指向 <code>https://localhost:3000/commands.html</code>。</li>
+    <li>检查浏览器 DevTools（任务窗格里 <kbd>F12</kbd>）控制台是否有错误。</li>
+    <li>检查 commands.js 是否成功注册所有 <code>ExecuteFunction</code>（控制台应有 <em>"5 commands registered"</em> 之类日志）。</li>
+  </ul>
+
+  <h2>5. 写入失败 / 撤销</h2>
+
+  <h3>"无法解析选区"</h3>
+  <ul>
+    <li>选区含合并单元格或非连续区域。</li>
+    <li>选中完整矩形后再试。</li>
+  </ul>
+
+  <h3>"权限不足"</h3>
+  <ul>
+    <li>工作簿是只读或受保护。取消保护后再试。</li>
+  </ul>
+
+  <h3>"PivotTable 创建失败"</h3>
+  <ul>
+    <li>检查数据源是否在活动工作表上。</li>
+    <li>检查表头行是否存在。</li>
+  </ul>
+
+  <h2>6. 日志与诊断</h2>
+  <p>在任务窗格里按 <kbd>F12</kbd> 打开 DevTools，查看 <strong>Console</strong> 标签。常见关键词：</p>
+  <ul>
+    <li><code>DS: stream</code> — 流式事件</li>
+    <li><code>DS: apply</code> — Apply 阶段</li>
+    <li><code>DS: error</code> — 错误</li>
+  </ul>
+  <p>遇到 bug 时贴日志可以快速定位。</p>
+
+  <h2>7. 完全重置</h2>
+  <p>所有设置存在 <code>localStorage</code>，可以清除：</p>
+  <pre><code>localStorage.clear();
+location.reload();</code></pre>
+  <blockquote>⚠️ 这会清掉所有 API Key 和历史会话。先导出 Markdown 备份。</blockquote>
+
+  <div class="help-pager">
+    <a class="prev" href="faq.html">← 常见问题</a>
+    <span></span>
+  </div>
+</body>
+</html>

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>FAQ · DeepSeek Excel Assistant</title>
+  <link rel="stylesheet" href="../shared.css" />
+</head>
+<body>
+  <h1>❓ FAQ</h1>
+
+  <h2>Account & config</h2>
+
+  <h3>Q: Where do I put my API key?</h3>
+  <p>Click <strong>⚙ Settings</strong> in the top-right of the pane; <strong>API Key</strong> is the first field. The key is stored only locally (localStorage) and never uploaded to any third party.</p>
+
+  <h3>Q: Which models / endpoints are supported?</h3>
+  <p>The default endpoint is DeepSeek official: <code>https://api.deepseek.com/v1/chat/completions</code>. Any OpenAI-compatible proxy works — set the endpoint URL to your gateway (e.g. Azure OpenAI, local Ollama).</p>
+
+  <h3>Q: Can I use GPT-4?</h3>
+  <p>Yes. Point the endpoint to OpenAI / Azure OpenAI and set model to <code>gpt-4o</code>, <code>gpt-4-turbo</code>, etc.</p>
+
+  <h3>Q: How do I write a good system prompt?</h3>
+  <p>Use role + behavior constraints:</p>
+  <pre><code>You are a senior financial analyst.
+- Reply in clear Chinese.
+- Produce verifiable Excel formulas.
+- Do not fabricate data.</code></pre>
+
+  <h2>Features</h2>
+
+  <h3>Q: Can I undo an AI write?</h3>
+  <p>Yes for cell writes (Office <kbd>⌘ Z</kbd>). Batch writes (pivot / report) must be removed manually.</p>
+
+  <h3>Q: How many formulas can diagnostics handle?</h3>
+  <p>Default 50 per scan (<code>FORMULA_DIAGNOSIS_LIMIT</code>). Larger ranges get a "shrink the selection" prompt.</p>
+
+  <h3>Q: PivotTable creation fails — what now?</h3>
+  <ul>
+    <li>Selection not rectangular (merged cells, gaps).</li>
+    <li>Mixed types in one column.</li>
+    <li>Office &lt; 2016 (no PivotTable API).</li>
+  </ul>
+
+  <h3>Q: Column type confidence is low?</h3>
+  <p>Below 50% AI marks it <strong>unknown</strong>. Try cleaning data first, or providing ≥ 20 sample rows.</p>
+
+  <h2>Limits</h2>
+
+  <h3>Q: Token limits?</h3>
+  <p>Sample data: up to 50 rows × 20 columns. Single message: estimated &gt; 8K gets truncated with a warning.</p>
+
+  <h3>Q: Streaming stutters?</h3>
+  <p>Check network (VPN / corporate proxy). Lowering Temperature to 0.3 produces shorter, more deterministic output.</p>
+
+  <div class="help-pager">
+    <a class="prev" href="buttons.html">← Button Reference</a>
+    <a class="next" href="troubleshooting.html">Troubleshooting →</a>
+  </div>
+</body>
+</html>

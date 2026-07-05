@@ -1,11 +1,28 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0" xmlns:ov="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="TaskPaneApp">
+<!--
+  DeepSeek Excel Assistant — Manifest v1.0.0.0
+
+  IMPORTANT: When modifying this file, keep the following three fields
+  EXACTLY unchanged once the add-in is sideloaded via `npm start`:
+    - <Id>                 AID = e504fb41-a4b4-4f93-8b3a-d44f23a4f0aa
+    - <Version>1.0.0.0</Version>
+    - SourceLocation + FunctionFile URLs at https://localhost:3000/
+
+  Changing any of those breaks the Office LTSC 2024 Mac WEF scanner
+  sideload path, requiring the full clean-restart procedure
+  (delete symlink, drop catalog row, drop tmp xlsx, kill webpack).
+-->
+<OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
+          xmlns:ov="http://schemas.microsoft.com/office/taskpaneappversionoverrides"
+          xsi:type="TaskPaneApp">
   <Id>e504fb41-a4b4-4f93-8b3a-d44f23a4f0aa</Id>
   <Version>1.0.0.0</Version>
   <ProviderName>DeepSeek</ProviderName>
   <DefaultLocale>zh-CN</DefaultLocale>
   <DisplayName DefaultValue="DeepSeek Excel 助手" />
-  <Description DefaultValue="DeepSeek AI 驱动的 Excel 助手：公式生成、数据分析与内容优化" />
+  <Description DefaultValue="DeepSeek AI 驱动的 Excel 助手：公式生成、诊断修复、数据脱敏与可视化" />
   <IconUrl DefaultValue="https://localhost:3000/assets/icon-32.png" />
   <HighResolutionIconUrl DefaultValue="https://localhost:3000/assets/icon-64.png" />
   <SupportUrl DefaultValue="https://www.contoso.com/help" />
@@ -29,11 +46,27 @@
             <LearnMoreUrl resid="GetStarted.LearnMoreUrl" />
           </GetStarted>
           <FunctionFile resid="Commands.Url" />
+          <!--
+            Ribbon layout: 1 custom Tab + 4 Groups + 8 buttons (B 场景: 数据分析师).
+
+            Every Control has its OWN <bt:Image> resource (3 sizes: 16/32/80).
+            Office's ribbon falls back to a Logo placeholder if buttons share
+            the same image or the image file fails to load, so each button
+            gets a dedicated resource ID even though they all share the
+            /assets/ribbon-*.png on disk.
+          -->
           <ExtensionPoint xsi:type="PrimaryCommandSurface">
             <CustomTab id="TabDeepSeek">
               <Label resid="CustomTab.Label" />
-              <Group id="GroupActions">
-                <Label resid="GroupActions.Label" />
+              <Icon>
+                <bt:Image size="16" resid="Icon.16x16" />
+                <bt:Image size="32" resid="Icon.32x32" />
+                <bt:Image size="80" resid="Icon.80x80" />
+              </Icon>
+
+              <!-- ============ Group 1: AI 助手 (主入口) ============ -->
+              <Group id="GroupAIAssistant">
+                <Label resid="GroupAIAssistant.Label" />
                 <Icon>
                   <bt:Image size="16" resid="Icon.16x16" />
                   <bt:Image size="32" resid="Icon.32x32" />
@@ -46,13 +79,268 @@
                     <Description resid="ShowTaskpaneButton.Tooltip" />
                   </Supertip>
                   <Icon>
-                    <bt:Image size="16" resid="Icon.16x16" />
-                    <bt:Image size="32" resid="Icon.32x32" />
-                    <bt:Image size="80" resid="Icon.80x80" />
+                    <bt:Image size="16" resid="BtnShowTaskpane.16x16" />
+                    <bt:Image size="32" resid="BtnShowTaskpane.32x32" />
+                    <bt:Image size="80" resid="BtnShowTaskpane.80x80" />
                   </Icon>
                   <Action xsi:type="ShowTaskpane">
                     <TaskpaneId>OfficeAutoShowTaskpaneId</TaskpaneId>
                     <SourceLocation resid="Taskpane.Url" />
+                  </Action>
+                </Control>
+                <Control xsi:type="Button" id="AnalyzeSelectionButton">
+                  <Label resid="AnalyzeSelectionButton.Label" />
+                  <Supertip>
+                    <Title resid="AnalyzeSelectionButton.Label" />
+                    <Description resid="AnalyzeSelectionButton.Tooltip" />
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="BtnAnalyze.16x16" />
+                    <bt:Image size="32" resid="BtnAnalyze.32x32" />
+                    <bt:Image size="80" resid="BtnAnalyze.80x80" />
+                  </Icon>
+                  <Action xsi:type="ExecuteFunction">
+                    <FunctionName>analyzeSelection</FunctionName>
+                  </Action>
+                </Control>
+              </Group>
+
+              <!-- ============ Group 2: 公式与数据 (两步) ============ -->
+              <Group id="GroupFormulaData">
+                <Label resid="GroupFormulaData.Label" />
+                <Icon>
+                  <bt:Image size="16" resid="Icon.16x16" />
+                  <bt:Image size="32" resid="Icon.32x32" />
+                  <bt:Image size="80" resid="Icon.80x80" />
+                </Icon>
+                <Control xsi:type="Button" id="GenerateFormulaButton">
+                  <Label resid="GenerateFormulaButton.Label" />
+                  <Supertip>
+                    <Title resid="GenerateFormulaButton.Label" />
+                    <Description resid="GenerateFormulaButton.Tooltip" />
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="BtnFormula.16x16" />
+                    <bt:Image size="32" resid="BtnFormula.32x32" />
+                    <bt:Image size="80" resid="BtnFormula.80x80" />
+                  </Icon>
+                  <Action xsi:type="ExecuteFunction">
+                    <FunctionName>generateFormula</FunctionName>
+                  </Action>
+                </Control>
+                <Control xsi:type="Button" id="DiagnoseFormulasButton">
+                  <Label resid="DiagnoseFormulasButton.Label" />
+                  <Supertip>
+                    <Title resid="DiagnoseFormulasButton.Label" />
+                    <Description resid="DiagnoseFormulasButton.Tooltip" />
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="BtnDiagnose.16x16" />
+                    <bt:Image size="32" resid="BtnDiagnose.32x32" />
+                    <bt:Image size="80" resid="BtnDiagnose.80x80" />
+                  </Icon>
+                  <Action xsi:type="ExecuteFunction">
+                    <FunctionName>diagnoseFormulas</FunctionName>
+                  </Action>
+                </Control>
+                <Control xsi:type="Button" id="CleanDataButton">
+                  <Label resid="CleanDataButton.Label" />
+                  <Supertip>
+                    <Title resid="CleanDataButton.Label" />
+                    <Description resid="CleanDataButton.Tooltip" />
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="BtnClean.16x16" />
+                    <bt:Image size="32" resid="BtnClean.32x32" />
+                    <bt:Image size="80" resid="BtnClean.80x80" />
+                  </Icon>
+                  <Action xsi:type="ExecuteFunction">
+                    <FunctionName>cleanData</FunctionName>
+                  </Action>
+                </Control>
+              </Group>
+
+              <!-- ============ Group 3: 可视化与代码 ============ -->
+              <Group id="GroupVizAndCode">
+                <Label resid="GroupVizAndCode.Label" />
+                <Icon>
+                  <bt:Image size="16" resid="Icon.16x16" />
+                  <bt:Image size="32" resid="Icon.32x32" />
+                  <bt:Image size="80" resid="Icon.80x80" />
+                </Icon>
+                <Control xsi:type="Button" id="InsertChartButton">
+                  <Label resid="InsertChartButton.Label" />
+                  <Supertip>
+                    <Title resid="InsertChartButton.Label" />
+                    <Description resid="InsertChartButton.Tooltip" />
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="BtnChart.16x16" />
+                    <bt:Image size="32" resid="BtnChart.32x32" />
+                    <bt:Image size="80" resid="BtnChart.80x80" />
+                  </Icon>
+                  <Action xsi:type="ExecuteFunction">
+                    <FunctionName>insertChart</FunctionName>
+                  </Action>
+                </Control>
+                <Control xsi:type="Button" id="TranslateToCodeButton">
+                  <Label resid="TranslateToCodeButton.Label" />
+                  <Supertip>
+                    <Title resid="TranslateToCodeButton.Label" />
+                    <Description resid="TranslateToCodeButton.Tooltip" />
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="BtnVba.16x16" />
+                    <bt:Image size="32" resid="BtnVba.32x32" />
+                    <bt:Image size="80" resid="BtnVba.80x80" />
+                  </Icon>
+                  <Action xsi:type="ExecuteFunction">
+                    <FunctionName>translateToCode</FunctionName>
+                  </Action>
+                </Control>
+              </Group>
+
+              <!-- ============ Group 4: 数据保护 (两步) ============ -->
+              <Group id="GroupDataProtection">
+                <Label resid="GroupDataProtection.Label" />
+                <Icon>
+                  <bt:Image size="16" resid="Icon.16x16" />
+                  <bt:Image size="32" resid="Icon.32x32" />
+                  <bt:Image size="80" resid="Icon.80x80" />
+                </Icon>
+                <Control xsi:type="Button" id="MaskPIIButton">
+                  <Label resid="MaskPIIButton.Label" />
+                  <Supertip>
+                    <Title resid="MaskPIIButton.Label" />
+                    <Description resid="MaskPIIButton.Tooltip" />
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="BtnPii.16x16" />
+                    <bt:Image size="32" resid="BtnPii.32x32" />
+                    <bt:Image size="80" resid="BtnPii.80x80" />
+                  </Icon>
+                  <Action xsi:type="ExecuteFunction">
+                    <FunctionName>maskPII</FunctionName>
+                  </Action>
+                </Control>
+              </Group>
+
+              <!-- ============ Group 5: AI 分析 (两步) ============ -->
+              <Group id="GroupAIAnalysis">
+                <Label resid="GroupAIAnalysis.Label" />
+                <Icon>
+                  <bt:Image size="16" resid="Icon.16x16" />
+                  <bt:Image size="32" resid="Icon.32x32" />
+                  <bt:Image size="80" resid="Icon.80x80" />
+                </Icon>
+                <Control xsi:type="Button" id="CorrelationMatrixButton">
+                  <Label resid="CorrelationMatrixButton.Label" />
+                  <Supertip>
+                    <Title resid="CorrelationMatrixButton.Label" />
+                    <Description resid="CorrelationMatrixButton.Tooltip" />
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="BtnCorrelation.16x16" />
+                    <bt:Image size="32" resid="BtnCorrelation.32x32" />
+                    <bt:Image size="80" resid="BtnCorrelation.80x80" />
+                  </Icon>
+                  <Action xsi:type="ExecuteFunction">
+                    <FunctionName>correlationMatrix</FunctionName>
+                  </Action>
+                </Control>
+                <Control xsi:type="Button" id="DetectOutliersButton">
+                  <Label resid="DetectOutliersButton.Label" />
+                  <Supertip>
+                    <Title resid="DetectOutliersButton.Label" />
+                    <Description resid="DetectOutliersButton.Tooltip" />
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="BtnOutlier.16x16" />
+                    <bt:Image size="32" resid="BtnOutlier.32x32" />
+                    <bt:Image size="80" resid="BtnOutlier.80x80" />
+                  </Icon>
+                  <Action xsi:type="ExecuteFunction">
+                    <FunctionName>detectOutliers</FunctionName>
+                  </Action>
+                </Control>
+                <Control xsi:type="Button" id="CreatePivotButton">
+                  <Label resid="CreatePivotButton.Label" />
+                  <Supertip>
+                    <Title resid="CreatePivotButton.Label" />
+                    <Description resid="CreatePivotButton.Tooltip" />
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="BtnPivot.16x16" />
+                    <bt:Image size="32" resid="BtnPivot.32x32" />
+                    <bt:Image size="80" resid="BtnPivot.80x80" />
+                  </Icon>
+                  <Action xsi:type="ExecuteFunction">
+                    <FunctionName>createPivot</FunctionName>
+                  </Action>
+                </Control>
+              </Group>
+
+              <!-- ============ Group 6: 报告与数据 (两步) ============ -->
+              <Group id="GroupReportData">
+                <Label resid="GroupReportData.Label" />
+                <Icon>
+                  <bt:Image size="16" resid="Icon.16x16" />
+                  <bt:Image size="32" resid="Icon.32x32" />
+                  <bt:Image size="80" resid="Icon.80x80" />
+                </Icon>
+                <Control xsi:type="Button" id="QuickReportButton">
+                  <Label resid="QuickReportButton.Label" />
+                  <Supertip>
+                    <Title resid="QuickReportButton.Label" />
+                    <Description resid="QuickReportButton.Tooltip" />
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="BtnReport.16x16" />
+                    <bt:Image size="32" resid="BtnReport.32x32" />
+                    <bt:Image size="80" resid="BtnReport.80x80" />
+                  </Icon>
+                  <Action xsi:type="ExecuteFunction">
+                    <FunctionName>quickReport</FunctionName>
+                  </Action>
+                </Control>
+                <Control xsi:type="Button" id="InferColumnTypesButton">
+                  <Label resid="InferColumnTypesButton.Label" />
+                  <Supertip>
+                    <Title resid="InferColumnTypesButton.Label" />
+                    <Description resid="InferColumnTypesButton.Tooltip" />
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="BtnColtypes.16x16" />
+                    <bt:Image size="32" resid="BtnColtypes.32x32" />
+                    <bt:Image size="80" resid="BtnColtypes.80x80" />
+                  </Icon>
+                  <Action xsi:type="ExecuteFunction">
+                    <FunctionName>inferColumnTypes</FunctionName>
+                  </Action>
+                </Control>
+              </Group>
+
+              <!-- ============ Group 5: 帮助与文档 ============ -->
+              <Group id="GroupHelp">
+                <Label resid="GroupHelp.Label" />
+                <Icon>
+                  <bt:Image size="16" resid="Icon.16x16" />
+                  <bt:Image size="32" resid="Icon.32x32" />
+                  <bt:Image size="80" resid="Icon.80x80" />
+                </Icon>
+                <Control xsi:type="Button" id="OpenHelpButton">
+                  <Label resid="OpenHelpButton.Label" />
+                  <Supertip>
+                    <Title resid="OpenHelpButton.Label" />
+                    <Description resid="OpenHelpButton.Tooltip" />
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="BtnHelp.16x16" />
+                    <bt:Image size="32" resid="BtnHelp.32x32" />
+                    <bt:Image size="80" resid="BtnHelp.80x80" />
+                  </Icon>
+                  <Action xsi:type="ExecuteFunction">
+                    <FunctionName>openHelp</FunctionName>
                   </Action>
                 </Control>
               </Group>
@@ -66,6 +354,51 @@
         <bt:Image id="Icon.16x16" DefaultValue="https://localhost:3000/assets/icon-16.png" />
         <bt:Image id="Icon.32x32" DefaultValue="https://localhost:3000/assets/icon-32.png" />
         <bt:Image id="Icon.80x80" DefaultValue="https://localhost:3000/assets/icon-80.png" />
+        <!-- Per-button icons. Office fallback-renders Logo placeholder
+             when several buttons share the same image, so each button
+             has a dedicated resource ID. -->
+        <bt:Image id="BtnShowTaskpane.16x16" DefaultValue="https://localhost:3000/assets/ribbon-show-taskpane-16.png" />
+        <bt:Image id="BtnShowTaskpane.32x32" DefaultValue="https://localhost:3000/assets/ribbon-show-taskpane-32.png" />
+        <bt:Image id="BtnShowTaskpane.80x80" DefaultValue="https://localhost:3000/assets/ribbon-show-taskpane-80.png" />
+        <bt:Image id="BtnAnalyze.16x16" DefaultValue="https://localhost:3000/assets/ribbon-analyze-16.png" />
+        <bt:Image id="BtnAnalyze.32x32" DefaultValue="https://localhost:3000/assets/ribbon-analyze-32.png" />
+        <bt:Image id="BtnAnalyze.80x80" DefaultValue="https://localhost:3000/assets/ribbon-analyze-80.png" />
+        <bt:Image id="BtnFormula.16x16" DefaultValue="https://localhost:3000/assets/ribbon-formula-16.png" />
+        <bt:Image id="BtnFormula.32x32" DefaultValue="https://localhost:3000/assets/ribbon-formula-32.png" />
+        <bt:Image id="BtnFormula.80x80" DefaultValue="https://localhost:3000/assets/ribbon-formula-80.png" />
+        <bt:Image id="BtnDiagnose.16x16" DefaultValue="https://localhost:3000/assets/ribbon-diagnose-16.png" />
+        <bt:Image id="BtnDiagnose.32x32" DefaultValue="https://localhost:3000/assets/ribbon-diagnose-32.png" />
+        <bt:Image id="BtnDiagnose.80x80" DefaultValue="https://localhost:3000/assets/ribbon-diagnose-80.png" />
+        <bt:Image id="BtnClean.16x16" DefaultValue="https://localhost:3000/assets/ribbon-clean-16.png" />
+        <bt:Image id="BtnClean.32x32" DefaultValue="https://localhost:3000/assets/ribbon-clean-32.png" />
+        <bt:Image id="BtnClean.80x80" DefaultValue="https://localhost:3000/assets/ribbon-clean-80.png" />
+        <bt:Image id="BtnChart.16x16" DefaultValue="https://localhost:3000/assets/ribbon-chart-insert-16.png" />
+        <bt:Image id="BtnChart.32x32" DefaultValue="https://localhost:3000/assets/ribbon-chart-insert-32.png" />
+        <bt:Image id="BtnChart.80x80" DefaultValue="https://localhost:3000/assets/ribbon-chart-insert-80.png" />
+        <bt:Image id="BtnVba.16x16" DefaultValue="https://localhost:3000/assets/ribbon-vba-16.png" />
+        <bt:Image id="BtnVba.32x32" DefaultValue="https://localhost:3000/assets/ribbon-vba-32.png" />
+        <bt:Image id="BtnVba.80x80" DefaultValue="https://localhost:3000/assets/ribbon-vba-80.png" />
+        <bt:Image id="BtnPii.16x16" DefaultValue="https://localhost:3000/assets/ribbon-pii-16.png" />
+        <bt:Image id="BtnPii.32x32" DefaultValue="https://localhost:3000/assets/ribbon-pii-32.png" />
+        <bt:Image id="BtnPii.80x80" DefaultValue="https://localhost:3000/assets/ribbon-pii-80.png" />
+        <bt:Image id="BtnCorrelation.16x16" DefaultValue="https://localhost:3000/assets/ribbon-correlation-16.png" />
+        <bt:Image id="BtnCorrelation.32x32" DefaultValue="https://localhost:3000/assets/ribbon-correlation-32.png" />
+        <bt:Image id="BtnCorrelation.80x80" DefaultValue="https://localhost:3000/assets/ribbon-correlation-80.png" />
+        <bt:Image id="BtnOutlier.16x16" DefaultValue="https://localhost:3000/assets/ribbon-outlier-16.png" />
+        <bt:Image id="BtnOutlier.32x32" DefaultValue="https://localhost:3000/assets/ribbon-outlier-32.png" />
+        <bt:Image id="BtnOutlier.80x80" DefaultValue="https://localhost:3000/assets/ribbon-outlier-80.png" />
+        <bt:Image id="BtnPivot.16x16" DefaultValue="https://localhost:3000/assets/ribbon-pivot-16.png" />
+        <bt:Image id="BtnPivot.32x32" DefaultValue="https://localhost:3000/assets/ribbon-pivot-32.png" />
+        <bt:Image id="BtnPivot.80x80" DefaultValue="https://localhost:3000/assets/ribbon-pivot-80.png" />
+        <bt:Image id="BtnReport.16x16" DefaultValue="https://localhost:3000/assets/ribbon-report-16.png" />
+        <bt:Image id="BtnReport.32x32" DefaultValue="https://localhost:3000/assets/ribbon-report-32.png" />
+        <bt:Image id="BtnReport.80x80" DefaultValue="https://localhost:3000/assets/ribbon-report-80.png" />
+        <bt:Image id="BtnColtypes.16x16" DefaultValue="https://localhost:3000/assets/ribbon-coltypes-16.png" />
+        <bt:Image id="BtnColtypes.32x32" DefaultValue="https://localhost:3000/assets/ribbon-coltypes-32.png" />
+        <bt:Image id="BtnColtypes.80x80" DefaultValue="https://localhost:3000/assets/ribbon-coltypes-80.png" />
+        <bt:Image id="BtnHelp.16x16" DefaultValue="https://localhost:3000/assets/ribbon-show-taskpane-16.png" />
+        <bt:Image id="BtnHelp.32x32" DefaultValue="https://localhost:3000/assets/ribbon-show-taskpane-32.png" />
+        <bt:Image id="BtnHelp.80x80" DefaultValue="https://localhost:3000/assets/ribbon-show-taskpane-80.png" />
       </bt:Images>
       <bt:Urls>
         <bt:Url id="GetStarted.LearnMoreUrl" DefaultValue="https://go.microsoft.com/fwlink/?LinkId=276812" />
@@ -73,14 +406,46 @@
         <bt:Url id="Taskpane.Url" DefaultValue="https://localhost:3000/taskpane.html" />
       </bt:Urls>
       <bt:ShortStrings>
-        <bt:String id="CustomTab.Label" DefaultValue="DeepSeek" />
-        <bt:String id="GroupActions.Label" DefaultValue="DeepSeek" />
         <bt:String id="GetStarted.Title" DefaultValue="DeepSeek Excel 助手" />
-        <bt:String id="ShowTaskpaneButton.Label" DefaultValue="打开任务窗格" />
+        <bt:String id="CustomTab.Label" DefaultValue="DeepSeek 助手" />
+        <bt:String id="GroupAIAssistant.Label" DefaultValue="AI 助手" />
+        <bt:String id="GroupFormulaData.Label" DefaultValue="公式与数据" />
+        <bt:String id="GroupVizAndCode.Label" DefaultValue="可视化与代码" />
+        <bt:String id="GroupDataProtection.Label" DefaultValue="数据保护" />
+        <bt:String id="GroupAIAnalysis.Label" DefaultValue="AI 分析" />
+        <bt:String id="GroupReportData.Label" DefaultValue="报告与数据" />
+        <bt:String id="GroupHelp.Label" DefaultValue="帮助与文档" />
+        <bt:String id="ShowTaskpaneButton.Label" DefaultValue="打开助手" />
+        <bt:String id="AnalyzeSelectionButton.Label" DefaultValue="选中分析" />
+        <bt:String id="GenerateFormulaButton.Label" DefaultValue="生成公式" />
+        <bt:String id="DiagnoseFormulasButton.Label" DefaultValue="诊断公式" />
+        <bt:String id="CleanDataButton.Label" DefaultValue="清洗数据" />
+        <bt:String id="InsertChartButton.Label" DefaultValue="插入图表" />
+        <bt:String id="TranslateToCodeButton.Label" DefaultValue="VBA 代码" />
+        <bt:String id="MaskPIIButton.Label" DefaultValue="PII 脱敏" />
+        <bt:String id="CorrelationMatrixButton.Label" DefaultValue="相关性矩阵" />
+        <bt:String id="DetectOutliersButton.Label" DefaultValue="异常值" />
+        <bt:String id="CreatePivotButton.Label" DefaultValue="AI 透视表" />
+        <bt:String id="QuickReportButton.Label" DefaultValue="快速报告" />
+        <bt:String id="InferColumnTypesButton.Label" DefaultValue="列类型" />
+        <bt:String id="OpenHelpButton.Label" DefaultValue="帮助文档" />
       </bt:ShortStrings>
       <bt:LongStrings>
-        <bt:String id="GetStarted.Description" DefaultValue="DeepSeek Excel 助手加载成功。点击「DeepSeek」选项卡的「打开任务窗格」按钮开始使用。" />
-        <bt:String id="ShowTaskpaneButton.Tooltip" DefaultValue="打开任务窗格以使用 DeepSeek AI 进行公式生成、数据分析与内容优化" />
+        <bt:String id="GetStarted.Description" DefaultValue="DeepSeek Excel 助手加载成功。在上方 DeepSeek 助手选项卡中点“打开助手”或“选中分析”即可开始。" />
+        <bt:String id="ShowTaskpaneButton.Tooltip" DefaultValue="展开 DeepSeek AI 助手任务窗格,包含对话、公式生成、数据分析与全部功能" />
+        <bt:String id="AnalyzeSelectionButton.Tooltip" DefaultValue="把当前 Excel 选区作为上下文发送给 AI,任务窗格自动打开分析视图" />
+        <bt:String id="GenerateFormulaButton.Tooltip" DefaultValue="AI 生成公式建议 → 任务窗格预览 → 点击应用才会写入单元格(两步,安全)" />
+        <bt:String id="DiagnoseFormulasButton.Tooltip" DefaultValue="AI 检查并修复公式错误 → 任务窗格预览 → 点击应用(两步)" />
+        <bt:String id="CleanDataButton.Tooltip" DefaultValue="AI 清洗脏数据 → 任务窗格 diff 预览 → 点击应用(两步)" />
+        <bt:String id="InsertChartButton.Tooltip" DefaultValue="AI 推荐图表类型 → 任务窗格确认 → 自动插入 Office 原生图表" />
+        <bt:String id="TranslateToCodeButton.Tooltip" DefaultValue="选中公式转 VBA 代码,复制到剪贴板并在任务窗格预览" />
+        <bt:String id="MaskPIIButton.Tooltip" DefaultValue="扫描当前 sheet 中的身份证/手机号/银行卡,任务窗格逐条 Apply(两步)" />
+        <bt:String id="CorrelationMatrixButton.Tooltip" DefaultValue="选中 2-10 列数字数据 → AI 计算 Pearson 相关系数 → 任务窗格热力图(只读,可 Apply 插入 sheet)" />
+        <bt:String id="DetectOutliersButton.Tooltip" DefaultValue="选中数字列 → AI 用 IQR/Z-score 检测异常值 → 任务窗格逐条 Apply(高亮或删除,两步)" />
+        <bt:String id="CreatePivotButton.Tooltip" DefaultValue="选中数据 → AI 推荐透视表结构(行/列/值) → 任务窗格预览 → Apply 创建透视表(两步)" />
+        <bt:String id="QuickReportButton.Tooltip" DefaultValue="选中数据 → AI 生成结构化报告(摘要+关键发现+建议) → 任务窗格预览 → Apply 新建工作表(两步)" />
+        <bt:String id="InferColumnTypesButton.Tooltip" DefaultValue="选中多列 → AI 推断类型(数字/日期/分类/文本/布尔) → Apply 加表头样式 + 命名范围(两步)" />
+        <bt:String id="OpenHelpButton.Tooltip" DefaultValue="打开帮助文档浮窗,包含用户指南、按钮参考、常见问题与疑难排查(中英双语,支持搜索)" />
       </bt:LongStrings>
     </Resources>
   </VersionOverrides>

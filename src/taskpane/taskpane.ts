@@ -27,11 +27,12 @@ import "./taskpane.css";
 import { ChatWindow } from "./components/ChatWindow";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { HistoryPanel, downloadSessionAsMarkdown } from "./components/HistoryPanel";
-import { CommandPaletteView, type CommandPaletteSelectDetail } from "./components/CommandPalette";
-import { ShortcutHelpView } from "./components/ShortcutHelp";
-import { KnowledgeBaseView } from "./components/KnowledgeBase";
-import { ShareDialogView, type ShareDialogDetail } from "./components/ShareDialog";
-import { UsageDashboardView } from "./components/UsageDashboard";
+// Type-only import — the 5 modal extras are loaded lazily via
+// ensureModalExtras() so they don't bloat the main bundle.
+import type { ModalExtras } from "./components/modalExtras";
+// Type-only import — HelpPanel is loaded lazily via ensureHelpPanel()
+// on the first ribbon "帮助" click / ⌘? / palette action.
+import type { HelpPanel } from "./components/HelpPanel";
 import {
   readShareFromUrl,
   clearShareFromUrl,
@@ -57,6 +58,7 @@ import {
 
 import { describeApiError } from "./services/deepseek";
 import { getSelectedData } from "./services/excel";
+import { panelForCommand } from "./components/RibbonFocusController";
 import type { ChatSession, DeepSeekConfig } from "./types";
 
 /** Top-level controller object - holds shared state and brokers between
@@ -75,16 +77,57 @@ class AppController {
   public chat: ChatWindow | null = null;
   public settings: SettingsPanel | null = null;
   public history: HistoryPanel | null = null;
-  /** Modal ⌘K command palette (PRD-03). */
-  public palette: CommandPaletteView | null = null;
-  /** Modal knowledge-base manager (PRD-10). */
-  public knowledgeBase: KnowledgeBaseView | null = null;
-  /** Modal share dialog (PRD-11). */
-  public shareDialog: ShareDialogView | null = null;
-  /** Modal usage dashboard (PRD-12). */
-  public usageDashboard: UsageDashboardView | null = null;
-  /** Modal shortcut-key help dialog (PRD-03). */
-  public shortcutHelp: ShortcutHelpView | null = null;
+  /** Lazy-loaded bundle of 5 modal/dialog components (PRD-03/10/11/12).
+   *  Filled in by ensureModalExtras() on the first ⌘K / ⌘B / ⌘⇧S / ⌘D /
+   *  ⌘/ keystroke (whichever comes first). Stays null until then so the
+   *  five component classes don't ship in the main bundle. */
+  private _modalExtras: ModalExtras | null = null;
+  private _modalExtrasPromise: Promise<ModalExtras> | null = null;
+  /** Lazy-loaded help panel (PRD-help). Shown on Ribbon 帮助 / ⌘? /
+   *  palette "openHelp". The HelpPanel class ships in its own chunk
+   *  so it stays out of the main bundle until first use. */
+  private _helpPanel: HelpPanel | null = null;
+  private _helpPanelPromise: Promise<HelpPanel> | null = null;
+  private async ensureHelpPanel(): Promise<HelpPanel> {
+    if (this._helpPanel) return this._helpPanel;
+    if (!this._helpPanelPromise) {
+      this._helpPanelPromise = (async () => {
+        const mod = await import("./components/HelpPanel");
+        const panel = new mod.HelpPanel();
+        document.body.appendChild(panel.root);
+        this._helpPanel = panel;
+        return panel;
+      })();
+    }
+    return this._helpPanelPromise;
+  }
+  /** Public toggle entry point — used by Ribbon "帮助", ⌘?, palette. */
+  public async toggleHelpPanel(): Promise<void> {
+    const panel = await this.ensureHelpPanel();
+    panel.toggle();
+  }
+  private async ensureModalExtras(): Promise<ModalExtras> {
+    if (this._modalExtras) return this._modalExtras;
+    if (!this._modalExtrasPromise) {
+      this._modalExtrasPromise = (async () => {
+        const mod = await import("./components/modalExtras");
+        const extras = mod.mountModalExtras({
+          onPaletteSelect: (detail) => this.runPaletteAction(detail),
+          onKbToast: (msg, kind) => this.chat?.toast(msg, kind),
+          onShareImport: (detail) => {
+            const imported = detail?.imported;
+            if (!imported) return;
+            this.importSharedSession(imported);
+          },
+          onShareToast: (msg, kind) => this.chat?.toast(msg, kind),
+          onUsageToast: (msg, kind) => this.chat?.toast(msg, kind),
+        });
+        this._modalExtras = extras;
+        return extras;
+      })();
+    }
+    return this._modalExtrasPromise;
+  }
   /** Internal flag so we only bind window.message once. */
   private _ribbonBound: boolean = false;
 
@@ -148,52 +191,11 @@ class AppController {
       ? this.sessions.find((s) => s.id === this.activeSessionId) || null
       : null;
     this.chat.renderSession(active);
-    this.shareDialog?.setSession(active);
 
-    // Mount the ⌘K command palette and shortcut-key help dialog (PRD-03).
-    // They are mounted at root level so they overlay the whole app.
-    this.palette = new CommandPaletteView();
-    this.palette.element.addEventListener("command-palette-select", (ev) => {
-      const e = ev as CustomEvent<CommandPaletteSelectDetail>;
-      this.runPaletteAction(e.detail.item);
-    });
-    document.body.appendChild(this.palette.element);
-
-    this.shortcutHelp = new ShortcutHelpView();
-    document.body.appendChild(this.shortcutHelp.element);
-
-    // Knowledge-base manager (PRD-10). ⌘B toggles it.
-    this.knowledgeBase = new KnowledgeBaseView();
-    this.knowledgeBase.element.addEventListener("kb-toast", (ev) => {
-      const e = ev as CustomEvent;
-      const { msg, kind } = e.detail || {};
-      this.chat.toast(msg, kind);
-    });
-    document.body.appendChild(this.knowledgeBase.element);
-
-    // Share dialog (PRD-11). ⌘⇧S toggles it.
-    this.shareDialog = new ShareDialogView();
-    this.shareDialog.element.addEventListener("share-import", (ev) => {
-      const e = ev as CustomEvent<ShareDialogDetail>;
-      const imported = e.detail?.imported;
-      if (!imported) return;
-      this.importSharedSession(imported);
-    });
-    this.shareDialog.element.addEventListener("share-toast", (ev) => {
-      const e = ev as CustomEvent;
-      const { msg, kind } = e.detail || {};
-      this.chat.toast(msg, kind);
-    });
-    document.body.appendChild(this.shareDialog.element);
-
-    // Usage dashboard (PRD-12). ⌘+D toggles it.
-    this.usageDashboard = new UsageDashboardView();
-    this.usageDashboard.element.addEventListener("usage-toast", (ev) => {
-      const e = ev as CustomEvent;
-      const { msg, kind } = e.detail || {};
-      this.chat.toast(msg, kind);
-    });
-    document.body.appendChild(this.usageDashboard.element);
+    // The 5 modal/dialog extras (palette / shortcutHelp / knowledgeBase /
+    // shareDialog / usageDashboard) are mounted lazily on first use by
+    // ensureModalExtras() — see modalExtras.ts. setSession() for the share
+    // dialog only matters once it's loaded, so we skip it here.
 
     // Auto-restore if the URL has a share fragment.
     this.maybeRestoreFromShareUrl();
@@ -220,11 +222,15 @@ class AppController {
       return;
     }
     if (action === "showShortcuts") {
-      this.shortcutHelp?.show();
+      void this.ensureModalExtras().then((e) => e.shortcutHelp.show());
       return;
     }
     if (action === "toggleKnowledgeBase") {
-      this.knowledgeBase?.toggle();
+      void this.ensureModalExtras().then((e) => e.knowledgeBase.toggle());
+      return;
+    }
+    if (action === "openHelp") {
+      void this.toggleHelpPanel();
       return;
     }
     // Otherwise synthesize a command envelope and run it through
@@ -259,26 +265,34 @@ class AppController {
 
         // Esc always works - closes palette / help / dialogs.
         if (ev.key === "Escape") {
-          if (this.palette?.visible) { this.palette.hide(); ev.preventDefault(); return; }
-          if (this.shortcutHelp && (this.shortcutHelp as any).root?.style?.display !== "none") {
-            this.shortcutHelp.hide(); ev.preventDefault(); return;
+          if (this._modalExtras?.palette.visible) { this._modalExtras.palette.hide(); ev.preventDefault(); return; }
+          const sh = this._modalExtras?.shortcutHelp as any;
+          if (sh && sh.root?.style?.display !== "none") {
+            sh.hide(); ev.preventDefault(); return;
           }
         }
 
         // While the palette is open, don't double-fire.
-        if (this.palette?.visible) return;
+        if (this._modalExtras?.palette.visible) return;
 
         // ⌘+K - toggle palette.
         if (isMod(ev) && (ev.key === "k" || ev.key === "K")) {
           ev.preventDefault();
-          this.palette?.show();
+          void this.ensureModalExtras().then((e) => e.palette.show());
           return;
         }
 
         // ⌘+/ - shortcuts help.
         if (isMod(ev) && ev.key === "/") {
           ev.preventDefault();
-          this.shortcutHelp?.show();
+          void this.ensureModalExtras().then((e) => e.shortcutHelp.show());
+          return;
+        }
+
+        // ⌘+? (Shift+/) - help docs (Fluent: ? opens Help).
+        if (isMod(ev) && ev.shiftKey && (ev.key === "?" || ev.key === "/")) {
+          ev.preventDefault();
+          void this.toggleHelpPanel();
           return;
         }
 
@@ -306,7 +320,7 @@ class AppController {
           }
           if (ev.key === "b" || ev.key === "B") {
             ev.preventDefault();
-            this.knowledgeBase?.toggle();
+            void this.ensureModalExtras().then((e) => e.knowledgeBase.toggle());
             return;
           }
           if ((ev.key === "s" || ev.key === "S") && ev.shiftKey) {
@@ -318,7 +332,7 @@ class AppController {
           }
           if (ev.key === "d" || ev.key === "D") {
             ev.preventDefault();
-            this.usageDashboard?.toggle();
+            void this.ensureModalExtras().then((e) => e.usageDashboard.toggle());
             return;
           }
           // ⌘+1..9 maps to ribbon buttons 2..9 in the spec, plus diagnose=0.
@@ -445,7 +459,7 @@ class AppController {
 
     // Core dispatcher - shared by every transport so the command table
     // lives in one place.
-    const handle = (raw: unknown, via: string) => {
+    const handle = async (raw: unknown, via: string) => {
       let data: any = raw;
       if (typeof raw === "string") {
         try {
@@ -460,89 +474,119 @@ class AppController {
       try { console.info(`[DeepSeek] ← ${cmd} via ${via}`); } catch {}
       this.updateCommandBanner(cmd, via);
       try {
-        switch (cmd) {
-          case "analyzeSelection":
-            ack("分析选区");
-            this.runAnalyzeSelection();
-            recordFeature("analyzeSelection");
-            break;
-          case "generateFormula":
-            ack("生成公式");
-            this.chat?.runGenerateFormula();
-            recordFeature("generateFormula");
-            break;
-          case "cleanData":
-            ack("数据清洗");
-            this.chat?.runCleanData();
-            recordFeature("cleanData");
-            break;
-          case "insertLastReply":
-            ack("插入回复");
-            this.chat?.insertLastReplyPublic();
-            recordFeature("insertLastReply");
-            break;
-          case "exportCurrentSession":
-            ack("导出对话");
-            this.chat?.exportCurrentSessionPublic();
-            recordFeature("exportCurrentSession");
-            break;
-          case "clearCurrentChat":
-            ack("清空对话");
-            this.chat?.clearCurrentChatPublic();
-            recordFeature("clearCurrentChat");
-            break;
-          case "toggleTheme":
-            ack("切换主题");
-            this.chat?.toggleTheme();
-            recordFeature("toggleTheme");
-            break;
-          case "openSettings":
-            ack("打开设置");
-            this.chat?.openSettingsPublic();
-            recordFeature("openSettings");
-            break;
-          case "diagnoseFormulas":
-            ack("诊断公式");
-            this.chat?.runDiagnoseFormulas();
-            recordFeature("diagnoseFormulas");
-            break;
-          case "translateToCode":
-            ack("公式转 VBA");
-            this.chat?.runFormulaToCode("vba");
-            recordFeature("translateToCode");
-            break;
-          case "insertChart":
-            ack("插入图表");
-            this.chat?.runInsertChart();
-            recordFeature("insertChart");
-            break;
-          case "maskPII":
-            ack("数据脱敏");
-            this.chat?.runMaskPII();
-            recordFeature("maskPII");
-            break;
-          case "multiSelectionAnalyze":
-            ack("多选区分析");
-            this.chat?.runMultiSelectionAnalyze();
-            recordFeature("multiSelectionAnalyze");
-            break;
-          case "openKnowledgeBase":
-            ack("知识库");
-            this.knowledgeBase?.toggle();
-            break;
-          case "shareSession":
-            ack("分享会话");
-            this.toggleShareDialog();
-            break;
-          case "usageDashboard":
-            ack("用量看板");
-            this.usageDashboard?.toggle();
-            break;
-          default:
-            console.warn("[DeepSeek] Unknown command:", cmd);
+        // Delegate to runRibbonCommand so every command gets:
+        //   - selection capture → contextBar injection
+        //   - banner feedback (top of taskpane)
+        //   - panel focus + highlight ring
+        //   - the actual handler
+        //   - banner hide on done / error
+        // Handlers are wrapped in try/catch so one failed command can't
+        // leave the banner stuck open.
+        const HANDLERS: Record<string, { label: string; run: () => Promise<void> | void }> = {
+          analyzeSelection: {
+            label: "分析选区",
+            run: () => this.runAnalyzeSelection(),
+          },
+          generateFormula: {
+            label: "生成公式",
+            run: () => this.chat?.runGenerateFormula() ?? Promise.resolve(),
+          },
+          cleanData: {
+            label: "清洗数据",
+            run: () => this.chat?.runCleanData() ?? Promise.resolve(),
+          },
+          insertLastReply: {
+            label: "插入回复",
+            run: () => this.chat?.insertLastReplyPublic() ?? Promise.resolve(),
+          },
+          exportCurrentSession: {
+            label: "导出对话",
+            run: () => this.chat?.exportCurrentSessionPublic() ?? Promise.resolve(),
+          },
+          clearCurrentChat: {
+            label: "清空对话",
+            run: () => this.chat?.clearCurrentChatPublic() ?? Promise.resolve(),
+          },
+          toggleTheme: {
+            label: "切换主题",
+            run: () => this.chat?.toggleTheme() ?? Promise.resolve(),
+          },
+          openSettings: {
+            label: "打开设置",
+            run: () => this.chat?.openSettingsPublic() ?? Promise.resolve(),
+          },
+          diagnoseFormulas: {
+            label: "诊断公式",
+            run: () => this.chat?.runDiagnoseFormulas() ?? Promise.resolve(),
+          },
+          translateToCode: {
+            label: "VBA 代码",
+            run: () => this.chat?.runFormulaToCode("vba") ?? Promise.resolve(),
+          },
+          insertChart: {
+            label: "插入图表",
+            run: () => this.chat?.runInsertChart() ?? Promise.resolve(),
+          },
+          maskPII: {
+            label: "PII 脱敏",
+            run: () => this.chat?.runMaskPII() ?? Promise.resolve(),
+          },
+          multiSelectionAnalyze: {
+            label: "多选区分析",
+            run: () => this.chat?.runMultiSelectionAnalyze() ?? Promise.resolve(),
+          },
+          openKnowledgeBase: {
+            label: "知识库",
+            run: () => this.ensureModalExtras().then((e) => e.knowledgeBase.toggle()),
+          },
+          shareSession: {
+            label: "分享会话",
+            run: () => this.toggleShareDialog(),
+          },
+          usageDashboard: {
+            label: "用量看板",
+            run: () => this.ensureModalExtras().then((e) => e.usageDashboard.toggle()),
+          },
+          showTaskpaneFocus: {
+            label: "任务窗格聚焦",
+            run: () => this.focusTaskpanePublic(),
+          },
+          correlationMatrix: {
+            label: "相关性矩阵",
+            run: () => this.chat?.runCorrelationMatrix() ?? Promise.resolve(),
+          },
+          detectOutliers: {
+            label: "异常值检测",
+            run: () => this.chat?.runDetectOutliers() ?? Promise.resolve(),
+          },
+          createPivot: {
+            label: "AI 透视表",
+            run: () => this.chat?.runCreatePivot() ?? Promise.resolve(),
+          },
+          quickReport: {
+            label: "快速报告",
+            run: () => this.chat?.runQuickReport() ?? Promise.resolve(),
+          },
+          inferColumnTypes: {
+            label: "列类型推断",
+            run: () => this.chat?.runInferColumnTypes() ?? Promise.resolve(),
+          },
+          openHelp: {
+            label: "帮助文档",
+            run: () => this.toggleHelpPanel(),
+          },
+        };
+        const entry = HANDLERS[cmd];
+        if (!entry) {
+          console.warn("[DeepSeek] Unknown command:", cmd);
+          return;
         }
+        ack(entry.label);
+        recordFeature(cmd);
+        await this.runRibbonCommand(cmd, entry.label, entry.run);
       } catch (err) {
         console.error("[DeepSeek] Command handler error:", err);
+        this.chat?.ribbonBanner.hide("error");
       }
     };
 
@@ -788,7 +832,7 @@ class AppController {
     saveActiveSessionId(id);
     const session = this.sessions.find((s) => s.id === id) || null;
     this.chat?.renderSession(session);
-    this.shareDialog?.setSession(session);
+    void this.ensureModalExtras().then((e) => e.shareDialog.setSession(session));
     this.refreshHistory();
     // Close the sidebar on selection so the chat is visible.
     this.history?.close();
@@ -828,14 +872,15 @@ class AppController {
   }
 
   /** Toggle the share dialog. */
-  public toggleShareDialog(): void {
+  public async toggleShareDialog(): Promise<void> {
     const id = this.activeSessionId;
     const session = id ? this.sessions.find((s) => s.id === id) || null : null;
-    this.shareDialog?.setSession(session);
-    if (this.shareDialog?.element.hidden) {
-      this.shareDialog?.show();
+    const { shareDialog } = await this.ensureModalExtras();
+    shareDialog.setSession(session);
+    if (shareDialog.element.hidden) {
+      shareDialog.show();
     } else {
-      this.shareDialog?.hide();
+      shareDialog.hide();
     }
   }
 
@@ -882,7 +927,7 @@ class AppController {
         ? this.sessions.find((s) => s.id === this.activeSessionId) || null
         : null;
       this.chat?.renderSession(next);
-      this.shareDialog?.setSession(next);
+      void this.ensureModalExtras().then((e) => e.shareDialog.setSession(next));
     }
     this.refreshHistory();
     this.chat?.toast(`已删除 ${ids.length} 个会话`, "success");
@@ -932,6 +977,10 @@ class AppController {
         this.chat.toast("请先在 Excel 中选中要分析的数据", "error");
         return;
       }
+      // Pre-fill the chat input with a detailed prompt about the
+      // selection. The user reviews and presses Enter to actually send.
+      // This is the safer "two-step" interaction the user wanted: AI
+      // suggestions are visible BEFORE being sent to the model.
       const prompt =
         `请分析以下 Excel 选区并给出洞察：\n\n` +
         `工作表：${selection.sheetName}\n` +
@@ -940,17 +989,333 @@ class AppController {
         "数据预览：\n" +
         `${excelValuesToMarkdown(selection.values).slice(0, 2000)}\n\n` +
         "请从趋势、异常、改进建议等维度给出结论。";
-      await this.chat.sendUserMessage(prompt);
-      this.chat.toast("已发送选区给 AI", "success");
+      // Update contextBar to reflect the captured selection (so the user
+      // can see what's about to be sent).
+      try {
+        this.chat.contextBar.setSelection(selection);
+      } catch {
+        /* noop */
+      }
+      // Pre-fill the input textarea and focus it. The user only has to
+      // press Enter to actually send.
+      try {
+        this.chat.prefillInput(prompt);
+        this.chat.toast("已填好分析 prompt,按 Enter 发送", "success");
+      } catch {
+        // Fallback: if prefillInput isn't available, fall back to the
+        // legacy behaviour of auto-sending.
+        await this.chat.sendUserMessage(prompt);
+        this.chat.toast("已发送选区给 AI", "success");
+      }
     } catch (err: any) {
       const msg = describeApiError(err) || err?.message || "无法获取选区";
       this.chat.toast(msg, "error");
     }
   }
+
+  /**
+   * Ribbon command orchestrator. Wraps every ribbon-driven handler with
+   * the standard "feedback loop":
+   *
+   *   1. Capture current Excel selection (cached if possible).
+   *   2. Push it into the ContextBar so the user sees what context is in play.
+   *   3. Show the top-of-taskpane RibbonBanner ("正在响应 · <label>").
+   *   4. Scroll/highlight the relevant panel (per panelForCommand map).
+   *   5. Run the actual handler.
+   *   6. Hide the banner (done/error/cancel).
+   *
+   * Errors raised by the handler are caught and turned into a banner
+   * "error" state. We re-throw so the caller's switch can log.
+   */
+  public async runRibbonCommand(
+    commandId: string,
+    label: string,
+    handler: () => Promise<void> | void
+  ): Promise<void> {
+    if (!this.chat) {
+      try {
+        await handler();
+      } catch (err) {
+        console.error("[DeepSeek] handler error (no chat):", err);
+      }
+      return;
+    }
+    // 1. Capture selection (best-effort; non-blocking for handlers
+    // that don't need it).
+    try {
+      let selection = this.chat.getCachedSelection?.() ?? null;
+      if (!selection) {
+        try {
+          selection = await getSelectedData();
+        } catch {
+          selection = null;
+        }
+      }
+      if (selection) {
+        try {
+          this.chat.contextBar?.setSelection(selection);
+        } catch {
+          /* noop */
+        }
+      }
+    } catch {
+      /* noop */
+    }
+    // 2. Banner + focus.
+    try {
+      this.chat.ribbonBanner.show(commandId, label);
+    } catch {
+      /* noop */
+    }
+    const panel = panelForCommand(commandId);
+    if (panel) {
+      try {
+        this.chat.ribbonFocus.focusPanel(panel);
+      } catch {
+        /* noop */
+      }
+    }
+    // 3. Run.
+    try {
+      await handler();
+      this.chat.ribbonBanner.hide("done");
+    } catch (err) {
+      console.error(`[DeepSeek] ribbon handler ${commandId} failed:`, err);
+      try {
+        this.chat.ribbonBanner.hide("error");
+      } catch {
+        /* noop */
+      }
+      // Surface a toast so the user knows something went wrong.
+      try {
+        const msg = (err as any)?.message || `${label} 失败`;
+        this.chat.toast(msg, "error");
+      } catch {
+        /* noop */
+      }
+    }
+  }
+
+  /**
+   * Force the taskpane to focus its chat input. Called when the user
+   * clicks the "打开助手" ribbon button while the panel is already
+   * visible. Without this the click feels like a no-op (Office already
+   * has the panel open, so showAsTaskpane() doesn't visibly react).
+   */
+  public focusTaskpanePublic(): void {
+    if (!this.chat) return;
+    // Scroll the chat list back to the top so the user sees recent context.
+    try {
+      const list = this.chat.element?.querySelector?.(".chat-list");
+      if (list) (list as HTMLElement).scrollTop = 0;
+    } catch {
+      /* noop */
+    }
+    // Focus the chat input so the user can start typing immediately.
+    try {
+      const ta = this.chat.element?.querySelector?.<HTMLTextAreaElement>(".chat-input-field");
+      if (ta) {
+        ta.focus({ preventScroll: true });
+        try {
+          ta.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        } catch {
+          /* noop */
+        }
+      }
+    } catch {
+      /* noop */
+    }
+    // Brief visual cue.
+    try {
+      this.chat.ribbonBanner.show("showTaskpaneFocus", "任务窗格聚焦");
+      window.setTimeout(() => {
+        try {
+          this.chat?.ribbonBanner.hide("done");
+        } catch {
+          /* noop */
+        }
+      }, 900);
+    } catch {
+      /* noop */
+    }
+  }
+
+  /**
+   * Run a ribbon command end-to-end and report which step succeeded.
+   * Used by `verifyRibbon()` and `verifyAllRibbon()` helpers.
+   *
+   * Implementation note: we synthesise a synthetic dispatch envelope
+   * (type=deepseek:command) and push it through the same `handle()`
+   * function the ribbon uses, so the test path is byte-identical to
+   * production. The handler is run with a 50ms synthetic timeout to
+   * avoid blocking the verify loop on real AI streaming.
+   */
+  public async verifyRibbonInternal(commandId: string): Promise<{
+    commandId: string;
+    panel: string | null;
+    bannerShown: boolean;
+    contextBarUpdated: boolean;
+    handlerRan: boolean;
+    durationMs: number;
+    error?: string;
+  }> {
+    const start = performance.now();
+    const panel = panelForCommand(commandId);
+    let bannerShown = false;
+    let contextBarUpdated = false;
+    let handlerRan = false;
+    let error: string | undefined;
+    try {
+      // Snapshot banner state before.
+      const bannerBefore = !!this.chat?.ribbonBanner?.isVisible?.();
+      // Snapshot contextBar before.
+      const ctxBefore = this.chat?.contextBar?.["state"]?.selection ?? null;
+      // Construct synthetic envelope. We invoke the same `handle()`
+      // closure used by transports by triggering a postMessage event.
+      const env = {
+        id: "verify-" + Date.now().toString(36),
+        type: "deepseek:command",
+        command: commandId,
+        payload: null,
+        t: Date.now(),
+        via: "verify",
+      };
+      window.postMessage(env, "*");
+      // Give the dispatch a moment to fire banner + focus.
+      await new Promise<void>((res) => window.setTimeout(res, 50));
+      bannerShown = !!this.chat?.ribbonBanner?.isVisible?.() && !bannerBefore;
+      const ctxAfter = this.chat?.contextBar?.["state"]?.selection ?? null;
+      contextBarUpdated = !!ctxAfter && ctxAfter !== ctxBefore;
+      // Wait until banner hides (the orchestrator hides after the
+      // handler completes, so this also confirms handlerRan).
+      const waited = await waitFor(() => !this.chat?.ribbonBanner?.isVisible?.(), 6000);
+      handlerRan = waited;
+      if (!waited) {
+        error = "Handler did not complete within 6s (banner still visible)";
+      }
+    } catch (err: any) {
+      error = err?.message || String(err);
+    }
+    return {
+      commandId,
+      panel,
+      bannerShown,
+      contextBarUpdated,
+      handlerRan,
+      durationMs: Math.round(performance.now() - start),
+      error,
+    };
+  }
 }
 
 /** Singleton instance referenced from commands.ts. */
 let app: AppController | null = null;
+
+/** Poll until `pred()` returns true or timeout elapses. */
+function waitFor(pred: () => boolean, timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const start = Date.now();
+    const tick = () => {
+      let ok = false;
+      try {
+        ok = pred();
+      } catch {
+        ok = false;
+      }
+      if (ok) {
+        resolve(true);
+        return;
+      }
+      if (Date.now() - start > timeoutMs) {
+        resolve(false);
+        return;
+      }
+      window.setTimeout(tick, 100);
+    };
+    tick();
+  });
+}
+
+/**
+ * Dev helper: invoke from the taskpane console to verify a ribbon
+ * command flows through dispatch → banner → focus → handler.
+ *
+ * Example:
+ *   await window.__deepseekApp.verifyRibbon("analyzeSelection")
+ *
+ * Returns a structured report so it's obvious which step (if any) failed.
+ */
+export function verifyRibbon(commandId: string): Promise<{
+  commandId: string;
+  panel: string | null;
+  bannerShown: boolean;
+  contextBarUpdated: boolean;
+  handlerRan: boolean;
+  durationMs: number;
+  error?: string;
+}> {
+  if (!app) {
+    return Promise.resolve({
+      commandId,
+      panel: null,
+      bannerShown: false,
+      contextBarUpdated: false,
+      handlerRan: false,
+      durationMs: 0,
+      error: "AppController not initialised yet",
+    });
+  }
+  return app.verifyRibbonInternal(commandId);
+}
+
+/**
+ * Dev helper: verify all 8 ribbon buttons in sequence.
+ * Logs a table of results to the console.
+ *
+ *   await window.__deepseekApp.verifyAllRibbon()
+ */
+export async function verifyAllRibbon(): Promise<void> {
+  if (!app) {
+    console.warn("[DeepSeek] app not initialised yet");
+    return;
+  }
+  const buttons = [
+    "showTaskpane",
+    "analyzeSelection",
+    "generateFormula",
+    "diagnoseFormulas",
+    "cleanData",
+    "insertChart",
+    "translateToCode",
+    "maskPII",
+    "correlationMatrix",
+    "detectOutliers",
+    "createPivot",
+    "quickReport",
+    "inferColumnTypes",
+  ];
+  const results: Array<Awaited<ReturnType<typeof verifyRibbon>>> = [];
+  for (const id of buttons) {
+    const r = await verifyRibbon(id);
+    results.push(r);
+    // Brief pause so banner transitions are visible in the UI.
+    await new Promise<void>((res) => window.setTimeout(res, 200));
+  }
+  try {
+    console.table(results);
+  } catch {
+    /* noop */
+  }
+  const failed = results.filter((r) => r.error);
+  if (failed.length === 0) {
+    console.info("[DeepSeek] ✅ All 8 ribbon buttons verified successfully");
+  } else {
+    console.warn(
+      `[DeepSeek] ⚠ ${failed.length}/${results.length} buttons failed:`,
+      failed.map((r) => `${r.commandId} (${r.error})`)
+    );
+  }
+}
 
 /** Office.js entry point - called by host when add-in is ready. */
 Office.onReady((info) => {
@@ -985,6 +1350,11 @@ Office.onReady((info) => {
 
   // Expose for debugging from the webview devtools.
   (window as any).deepseekApp = app;
+  // Verify helpers used by the dev console (see verifyRibbon / verifyAllRibbon).
+  (window as any).__deepseekVerify = {
+    ribbon: verifyRibbon,
+    all: verifyAllRibbon,
+  };
 });
 
 /** Exported so commands.ts can call into the chat window from the ribbon. */

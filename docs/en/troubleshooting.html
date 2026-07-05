@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Troubleshooting · DeepSeek Excel Assistant</title>
+  <link rel="stylesheet" href="../shared.css" />
+</head>
+<body>
+  <h1>🔧 Troubleshooting</h1>
+
+  <h2>1. Add-in not loading / blank pane</h2>
+  <ul>
+    <li>Validate manifest: <code>office-addin-manifest validate manifest.xml</code></li>
+    <li>WEF scanner: requires <code>Version="1.0.0.0"</code> + <code>AID</code> + <code>SourceLocation</code> matching exactly.</li>
+    <li>Dev server: confirm <code>https://localhost:3000/taskpane.html</code> reachable.</li>
+    <li>Certs: <code>office-addin-dev-certs install</code>.</li>
+  </ul>
+
+  <h2>2. "Add-in error" dialog</h2>
+  <p>Usually dev server down or port collision.</p>
+  <pre><code>lsof -i :3000
+kill -9 &lt;PID&gt;
+npm start</code></pre>
+
+  <h2>3. AI request failures</h2>
+
+  <h3>401 Unauthorized</h3>
+  <ul><li>Check API key (no stray spaces).</li><li>Endpoint must match the provider.</li></ul>
+
+  <h3>429 Too Many Requests</h3>
+  <ul><li>Quota exhausted. Check provider dashboard.</li><li>Corporate rate limit — wait and retry.</li></ul>
+
+  <h3>500 / 502 / 503 / 504</h3>
+  <ul><li>Provider outage. Retry shortly.</li><li>Switch models (chat ↔ reasoner).</li></ul>
+
+  <h3>Network / CORS</h3>
+  <ul><li>Self-hosted proxy may block OPTIONS preflight.</li><li>Whitelist <code>api.deepseek.com</code> in corporate gateway.</li></ul>
+
+  <h2>4. Ribbon button does nothing</h2>
+  <ul>
+    <li>Verify <code>FunctionFile</code> points to <code>https://localhost:3000/commands.html</code>.</li>
+    <li>Open DevTools (<kbd>F12</kbd>) and check Console.</li>
+    <li>Confirm commands.js registered all <code>ExecuteFunction</code>s.</li>
+  </ul>
+
+  <h2>5. Write failures</h2>
+  <h3>"Cannot parse selection"</h3>
+  <p>Selection contains merged or non-contiguous cells.</p>
+
+  <h3>"Permission denied"</h3>
+  <p>Workbook is read-only or protected — unprotect first.</p>
+
+  <h3>"PivotTable creation failed"</h3>
+  <p>Source not on the active sheet, or headers missing.</p>
+
+  <h2>6. Logs</h2>
+  <p>Press <kbd>F12</kbd> in the task pane. Watch the Console:</p>
+  <ul>
+    <li><code>DS: stream</code> — streaming events</li>
+    <li><code>DS: apply</code> — Apply phase</li>
+    <li><code>DS: error</code> — errors</li>
+  </ul>
+
+  <h2>7. Full reset</h2>
+  <pre><code>localStorage.clear();
+location.reload();</code></pre>
+  <blockquote>⚠️ This clears all API keys and history. Export Markdown first.</blockquote>
+
+  <div class="help-pager">
+    <a class="prev" href="faq.html">← FAQ</a>
+    <span></span>
+  </div>
+</body>
+</html>

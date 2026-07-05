@@ -963,3 +963,338 @@ async function writeFormulaToAddress(address: string, formula: string): Promise<
     });
   }, "无法写入公式");
 }
+
+/* ----------------------------------------------------------------- *
+ * Phase 4 — Apply operations for advanced-analysis panels          *
+ *                                                                  *
+ * Each function takes a payload produced by the matching ribbon    *
+ * panel and writes it back to Excel. They all follow the existing   *
+ * safeCall + run pattern so the taskpane host can call them        *
+ * directly and surface a toast on success/error.                   *
+ * ----------------------------------------------------------------- */
+
+/** Address of a single cell, e.g. "C12". */
+export interface CellAddress {
+  sheet: string;
+  address: string;
+}
+
+/** A single outlier cell to highlight (used by OutlierPanel Apply). */
+export interface OutlierCellRef {
+  rowIndex: number; // 1-based Excel row
+  column: string;   // header text (used for the toast summary only)
+}
+
+/** Highlight a list of outlier cells with a soft alert fill (two-step
+ *  Apply for the OutlierPanel). Returns the number of cells coloured. */
+export async function highlightOutliers(
+  cells: OutlierCellRef[],
+  baseAddress?: { sheet: string; rowStart: number; columnStart: number }
+): Promise<number> {
+  if (!cells || cells.length === 0) return 0;
+  return safeCall(async () => {
+    return run(async (ctx) => {
+      const ws = ctx.workbook.worksheets.getActiveWorksheet();
+      ws.load("name");
+      await ctx.sync();
+      const headerRow = baseAddress?.rowStart ?? 1;
+      let count = 0;
+      for (const o of cells) {
+        try {
+          // Resolve header column index from the matching column name.
+          const headerRange = ws.getRange(`A${headerRow}:Z${headerRow}`);
+          headerRange.load(["values"]);
+          await ctx.sync();
+          const headers: string[] = (headerRange.values as string[][])[0] || [];
+          const colIdx = headers.findIndex((h) => h === o.column);
+          if (colIdx < 0) continue;
+          const colLetter = colIndexToLetter(colIdx);
+          const target = ws.getRange(`${colLetter}${o.rowIndex}`);
+          target.format.fill.color = "#FFD7D5"; // alert red, soft
+          count++;
+        } catch {
+          /* skip */
+        }
+      }
+      await ctx.sync();
+      return count;
+    });
+  }, "高亮异常值失败");
+}
+
+/** Convert a 0-based column index to Excel letter(s) (A..Z, AA..ZZ, AAA..) */
+function colIndexToLetter(idx: number): string {
+  let n = idx + 1;
+  let s = "";
+  while (n > 0) {
+    const r = (n - 1) % 26;
+    s = String.fromCharCode(65 + r) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
+}
+
+/** PivotSpec — mirrors PivotBuilderPanel.PivotSpec. */
+export interface PivotSpecApply {
+  rows: string[];
+  columns: string[];
+  values: Array<{ column: string; aggregation: "sum" | "count" | "avg" }>;
+}
+
+/** Create a PivotTable from the user's data range. The PivotTable API in
+ *  Office.js is complex; we use the lowest-friction shape:
+ *    worksheet.pivotTables.add(name, sourceRange, destinationCell)
+ *  then add fields by name. The PivotTable is rendered on a NEW sheet so
+ *  the user has room to scroll. */
+export async function createPivotTable(
+  sourceAddress: string,
+  sheetName: string,
+  spec: PivotSpecApply
+): Promise<string> {
+  return safeCall(async () => {
+    return run(async (ctx) => {
+      const sourceWs = ctx.workbook.worksheets.getActiveWorksheet();
+      sourceWs.load("name");
+      await ctx.sync();
+      // Strip sheet prefix from the address.
+      const bang = sourceAddress.indexOf("!");
+      const cleanAddress =
+        bang >= 0 ? sourceAddress.slice(bang + 1) : sourceAddress;
+      const sourceRange = sourceWs.getRange(cleanAddress);
+
+      // Pick / create the destination sheet.
+      let destWs: Excel.Worksheet;
+      try {
+        destWs = ctx.workbook.worksheets.add(sheetName);
+      } catch {
+        destWs = ctx.workbook.worksheets.getItem(sheetName);
+      }
+      destWs.load("name");
+      await ctx.sync();
+      const destCell = destWs.getRange("A3");
+
+      // Create the pivot. PivotTable creation API: pivotTables.add(name,
+      // sourceRange, destinationCell).
+      const pivotName = `Pivot_${Date.now().toString(36)}`;
+      const pivot = destWs.pivotTables.add(pivotName, sourceRange, destCell);
+      // Best-effort field setup — fields must exist by name in the header
+      // row, otherwise the call throws which we swallow.
+      const tryAddField = (
+        fieldName: string,
+        area: "row" | "column" | "data"
+      ): void => {
+        try {
+          const field = pivot.hierarchies.getItem(fieldName);
+          if (area === "row") pivot.rowHierarchies.add(field);
+          else if (area === "column") pivot.columnHierarchies.add(field);
+          else pivot.dataHierarchies.add(field);
+        } catch {
+          /* skip — column not present in header */
+        }
+      };
+      for (const r of spec.rows) tryAddField(r, "row");
+      for (const c of spec.columns) tryAddField(c, "column");
+      for (const v of spec.values) tryAddField(v.column, "data");
+
+      await ctx.sync();
+      return `${destWs.name} 已创建透视表「${pivotName}」`;
+    });
+  }, "创建透视表失败");
+}
+
+/** Payload for the quick-report Apply — mirrors ReportBuilderPanel. */
+export interface ReportPayloadApply {
+  title: string;
+  summary: string;
+  sections: Array<{ heading: string; body: string }>;
+  recommendations: string[];
+}
+
+/** Write a structured report into a NEW worksheet. The user can rename
+ *  the sheet via the standard Excel tab UI afterwards. */
+export async function writeReportSheet(
+  payload: ReportPayloadApply
+): Promise<string> {
+  return safeCall(async () => {
+    return run(async (ctx) => {
+      const name = `报告_${new Date().toLocaleDateString("zh-CN").replace(/\//g, "-")}_${Date.now().toString(36).slice(-4)}`;
+      const ws = ctx.workbook.worksheets.add(name);
+      ws.load("name");
+      await ctx.sync();
+
+      // Row 1: title (merged A1:F1, bold, large).
+      const titleRange = ws.getRange("A1:F1");
+      titleRange.merge();
+      titleRange.values = [[payload.title || "数据报告"]];
+      titleRange.format.font.bold = true;
+      titleRange.format.font.size = 16;
+      titleRange.format.fill.color = "#ECFDF5";
+      // Row 2: summary (merged A2:F2).
+      const summaryRange = ws.getRange("A2:F2");
+      summaryRange.merge();
+      summaryRange.values = [[payload.summary || ""]];
+      summaryRange.format.font.italic = true;
+      summaryRange.format.wrapText = true;
+
+      let row = 4;
+      for (const sec of payload.sections || []) {
+        ws.getRange(`A${row}`).values = [[sec.heading]];
+        ws.getRange(`A${row}`).format.font.bold = true;
+        ws.getRange(`A${row}`).format.font.color = "#217346";
+        row++;
+        ws.getRange(`A${row}:F${row}`).merge();
+        ws.getRange(`A${row}:F${row}`).values = [[sec.body || ""]];
+        ws.getRange(`A${row}:F${row}`).format.wrapText = true;
+        row += 2;
+      }
+      if (payload.recommendations && payload.recommendations.length) {
+        ws.getRange(`A${row}`).values = [["建议"]];
+        ws.getRange(`A${row}`).format.font.bold = true;
+        ws.getRange(`A${row}`).format.font.color = "#FFB300";
+        row++;
+        for (const r of payload.recommendations) {
+          ws.getRange(`A${row}`).values = [[`• ${r}`]];
+          row++;
+        }
+      }
+      await ctx.sync();
+      return `${ws.name} 已写入报告(${payload.sections?.length || 0} 节 / ${payload.recommendations?.length || 0} 条建议)`;
+    });
+  }, "写入报告失败");
+}
+
+/** Payload for column-format Apply — mirrors ColumnTypePanel. */
+export interface ColumnTypeRowApply {
+  column: string;
+  proposedType: string;
+  confidence: number;
+  format?: string;
+  namedRange?: string;
+}
+
+/** Apply header bold + per-column number formats + named ranges in one
+ *  pass. The baseAddress points at the top-left header cell (e.g. A1). */
+export async function applyColumnFormatting(
+  baseAddress: { sheet: string; rowStart: number; columnStart: number },
+  columnCount: number,
+  rows: ColumnTypeRowApply[]
+): Promise<string> {
+  return safeCall(async () => {
+    return run(async (ctx) => {
+      const ws = ctx.workbook.worksheets.getActiveWorksheet();
+      ws.load("name");
+      await ctx.sync();
+      const headerRow = baseAddress.rowStart;
+      const startCol = baseAddress.columnStart;
+
+      // Bold + fill the entire header row.
+      const headerEndCol = colIndexToLetter(startCol - 1 + columnCount - 1);
+      const headerRange = ws.getRange(`A${headerRow}:${headerEndCol}${headerRow}`);
+      headerRange.format.font.bold = true;
+      headerRange.format.fill.color = "#ECFDF5";
+      headerRange.format.autofitColumns();
+
+      // Per-column number formats.
+      let formatted = 0;
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+        const colLetter = colIndexToLetter(startCol - 1 + i);
+        const colRange = ws.getRange(`${colLetter}${headerRow + 1}:${colLetter}1048576`);
+        if (r.format) {
+          try {
+            colRange.numberFormat = [[r.format]];
+            formatted++;
+          } catch {
+            /* skip */
+          }
+        }
+      }
+
+      // Named ranges per column (best-effort).
+      let named = 0;
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+        if (!r.namedRange) continue;
+        const colLetter = colIndexToLetter(startCol - 1 + i);
+        try {
+          const namedRef = ctx.workbook.names.getItemOrNullObject(r.namedRange);
+          namedRef.load("name");
+          await ctx.sync();
+          if (namedRef.isNullObject) {
+            ctx.workbook.names.add(
+              r.namedRange,
+              ws.getRange(`${colLetter}${headerRow}:${colLetter}1048576`)
+            );
+            named++;
+          }
+        } catch {
+          /* skip — invalid name */
+        }
+      }
+
+      await ctx.sync();
+      return `${ws.name}:表头加粗 · ${formatted}/${rows.length} 列应用数字格式 · ${named} 个命名范围`;
+    });
+  }, "应用列格式失败");
+}
+
+/** Insert a Pearson correlation matrix into the active sheet starting at
+ *  the given cell. Each cell gets a 3-color conditional format (green /
+ *  white / red) so the heat-map renders automatically. */
+export async function insertCorrelationMatrix(
+  labels: string[],
+  cells: Array<{ row: number; col: number; value: number }>,
+  startAddress: string
+): Promise<string> {
+  return safeCall(async () => {
+    return run(async (ctx) => {
+      const ws = ctx.workbook.worksheets.getActiveWorksheet();
+      ws.load("name");
+      await ctx.sync();
+      const n = labels.length;
+      // Write a row of column headers then n rows of values.
+      const matrixRange = ws.getRange(startAddress).getResizedRange(n, n);
+      const values: (string | number)[][] = [];
+      // First row: blank + labels[0..n-1]
+      values.push(["", ...labels.map(String)]);
+      // Following rows: labels[r] + cells[r][0..n-1]
+      for (let r = 0; r < n; r++) {
+        const row: (string | number)[] = [labels[r]];
+        for (let c = 0; c < n; c++) {
+          const cell = cells.find((x) => x.row === r && x.col === c);
+          row.push(cell ? Number(cell.value.toFixed(3)) : 0);
+        }
+        values.push(row);
+      }
+      matrixRange.values = values;
+      // Bold the header row + first column.
+      const headerRow = ws.getRange(startAddress).getResizedRange(0, n);
+      headerRow.format.font.bold = true;
+      headerRow.format.fill.color = "#ECFDF5";
+      const firstCol = ws.getRange(startAddress).getResizedRange(n, 0);
+      firstCol.format.font.bold = true;
+      firstCol.format.fill.color = "#ECFDF5";
+      // Data range = the inner n×n block (skipping header row & column).
+      const bang = startAddress.indexOf("!");
+      const cleanAddress =
+        bang >= 0 ? startAddress.slice(bang + 1) : startAddress;
+      const startCell = ws.getRange(cleanAddress);
+      const dataStart = startCell.getCell(1, 1); // offset 1,1 inside matrix
+      const dataRange = dataStart.getResizedRange(n - 1, n - 1);
+      // Conditional format: 3-color scale -1 (red) → 0 (white) → +1 (green).
+      try {
+        const cf = dataRange.conditionalFormats.add(Excel.ConditionalFormatType.colorScale);
+        const scale = cf as unknown as Excel.ColorScaleConditionalFormat;
+        scale.criteria = {
+          minimum: { color: "#D13438", type: Excel.ConditionalFormatColorCriterionType.lowestValue },
+          midpoint: { color: "#FFFFFF", type: Excel.ConditionalFormatColorCriterionType.number, formula: "0" },
+          maximum: { color: "#217346", type: Excel.ConditionalFormatColorCriterionType.highestValue },
+        };
+      } catch {
+        /* conditional format not supported — values still written */
+      }
+      await ctx.sync();
+      return `${ws.name} 已写入 ${n}×${n} 相关性矩阵 + 条件格式`;
+    });
+  }, "插入相关性矩阵失败");
+}

@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Button Reference · DeepSeek Excel Assistant</title>
+  <link rel="stylesheet" href="../shared.css" />
+</head>
+<body>
+  <h1>🎛️ Button Reference</h1>
+  <p>The add-in exposes 13 buttons under a custom Ribbon tab <strong>DeepSeek</strong>, grouped into 6. Every write operation is two-step (AI proposes → user confirms Apply).</p>
+
+  <h2>Group 1: AI Assistant</h2>
+  <table>
+    <tr><th>Button</th><th>What it does</th></tr>
+    <tr><td>📊 <strong>Excel Context</strong></td><td>Captures the active selection (address + headers + samples) into the conversation.</td></tr>
+    <tr><td>🧹 <strong>PII Mask</strong></td><td>Scans the selection for IDs / phones / emails / cards and proposes masks.</td></tr>
+    <tr><td>🔧 <strong>Code Gen</strong></td><td>Converts the selected formula into VBA or Office Scripts.</td></tr>
+    <tr><td>📈 <strong>Chart Suggest</strong></td><td>Picks 3 most fitting chart types for the selected data.</td></tr>
+  </table>
+
+  <h2>Group 2: Formula & Data</h2>
+  <table>
+    <tr><th>Button</th><th>What it does</th></tr>
+    <tr><td>📝 <strong>Explain Formula</strong></td><td>Decomposes the selected formula piece by piece.</td></tr>
+    <tr><td>🔍 <strong>Diagnose</strong></td><td>Scans selected formulas for errors and proposes fixes.</td></tr>
+    <tr><td>🛠 <strong>Apply Fix</strong></td><td>One-click apply of the proposed fix in-place.</td></tr>
+  </table>
+
+  <h2>Group 3: Visualization & Code</h2>
+  <table>
+    <tr><th>Button</th><th>What it does</th></tr>
+    <tr><td>📐 <strong>Format Code</strong></td><td>Pretty-prints selected VBA / formula text.</td></tr>
+  </table>
+
+  <h2>Group 4: Data Protection</h2>
+  <table>
+    <tr><th>Button</th><th>What it does</th></tr>
+    <tr><td>🔒 <strong>Mask In Place</strong></td><td>Replaces sensitive values in the selection with masked versions.</td></tr>
+  </table>
+
+  <h2>Group 5: AI Analysis (Phase 4)</h2>
+  <table>
+    <tr><th>Button</th><th>What it does</th></tr>
+    <tr><td>🟩 <strong>Correlation Matrix</strong></td><td>Pearson correlation of all numeric columns → NxN heatmap with conditional formatting.</td></tr>
+    <tr><td>🟥 <strong>Outlier Detection</strong></td><td>z-score scan, highlights outlier cells.</td></tr>
+    <tr><td>🧮 <strong>AI Pivot</strong></td><td>AI proposes rows/columns/values, Apply creates a PivotTable on a new sheet.</td></tr>
+  </table>
+
+  <h2>Group 6: Report & Data (Phase 4)</h2>
+  <table>
+    <tr><th>Button</th><th>What it does</th></tr>
+    <tr><td>📝 <strong>Quick Report</strong></td><td>Generates a structured report (title / summary / sections / recommendations) and writes it to a new sheet.</td></tr>
+    <tr><td>🏷️ <strong>Column Types</strong></td><td>Infers each column type (number / date / categorical / currency / percent) → Apply bolds headers, autofilters, adds named ranges, sets number format.</td></tr>
+  </table>
+
+  <h2>Pane icons</h2>
+  <table>
+    <tr><th>Icon</th><th>Action</th></tr>
+    <tr><td>📊</td><td>Inject selection data into the prompt</td></tr>
+    <tr><td>📌</td><td>Insert current AI reply into the active cell</td></tr>
+    <tr><td>📋</td><td>Copy reply to clipboard</td></tr>
+    <tr><td>🔄</td><td>Regenerate last reply</td></tr>
+    <tr><td>🔀</td><td>Branch from this message (regen from this point)</td></tr>
+  </table>
+
+  <div class="help-pager">
+    <a class="prev" href="guide.html">← User Guide</a>
+    <a class="next" href="faq.html">FAQ →</a>
+  </div>
+</body>
+</html>

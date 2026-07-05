@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>User Guide · DeepSeek Excel Assistant</title>
+  <link rel="stylesheet" href="../shared.css" />
+</head>
+<body>
+  <h1>🚀 User Guide</h1>
+  <p>For first-time users. By the end you should be able to cover every common workflow.</p>
+
+  <h2>1. Install & launch</h2>
+  <ol>
+    <li>Open Excel on Office 365 / LTSC Standard / Mac 2024.</li>
+    <li>Insert → My Add-ins → load <code>manifest.xml</code>.</li>
+    <li>The <strong>DeepSeek</strong> tab appears in the Ribbon.</li>
+    <li>Click the <kbd>⚙</kbd> icon in the task pane and fill in your API Key + endpoint.</li>
+  </ol>
+
+  <h2>2. First conversation</h2>
+  <ol>
+    <li>Type a question in the pane input, e.g. <em>"summarize this sales sheet"</em>.</li>
+    <li>Optional: select a range in Excel first, then click <strong>📊 Selection</strong> to attach it.</li>
+    <li>Hit <strong>Send</strong>. The stream will reveal the reply token by token.</li>
+    <li>Click <strong>📌 Insert</strong> on a reply to write it back to the active cell.</li>
+  </ol>
+
+  <h2>3. Keyboard shortcuts</h2>
+  <table>
+    <tr><th>Key</th><th>Action</th></tr>
+    <tr><td><kbd>⌘ K</kbd> / <kbd>Ctrl K</kbd></td><td>Open command palette</td></tr>
+    <tr><td><kbd>⌘ N</kbd></td><td>New session</td></tr>
+    <tr><td><kbd>⌘ H</kbd></td><td>Toggle history sidebar</td></tr>
+    <tr><td><kbd>⌘ B</kbd></td><td>Knowledge base</td></tr>
+    <tr><td><kbd>⌘ ⇧ S</kbd></td><td>Share session</td></tr>
+    <tr><td><kbd>⌘ D</kbd></td><td>Usage dashboard</td></tr>
+    <tr><td><kbd>⌘ /</kbd></td><td>Shortcut help</td></tr>
+    <tr><td><kbd>Esc</kbd></td><td>Close overlays/panels</td></tr>
+  </table>
+
+  <h2>4. Excel context capture</h2>
+  <ul>
+    <li>Select a contiguous range (with headers) in Excel.</li>
+    <li>Click Ribbon <strong>📊 Excel context</strong> or pane <strong>📊 Selection</strong>.</li>
+    <li>The <strong>address, headers, first 50 sample rows</strong> are appended to the prompt.</li>
+  </ul>
+  <blockquote>💡 <strong>Tip</strong>: more samples → better inference. Beyond 200 rows it gets truncated to stay under token limits.</blockquote>
+
+  <h2>5. System prompt (advanced)</h2>
+  <p>In the Settings panel, <strong>System prompt</strong> lets you define an AI persona, e.g.:</p>
+  <pre><code>You are a senior financial analyst. Be rigorous; produce verifiable Excel formulas or VBA.</code></pre>
+  <p>The system prompt applies to all sessions.</p>
+
+  <h2>6. History</h2>
+  <ul>
+    <li>Up to 50 sessions retained; oldest auto-pruned.</li>
+    <li>Search by title (after opening the sidebar with <kbd>⌘ H</kbd>).</li>
+    <li>Rename, export Markdown, batch delete.</li>
+  </ul>
+
+  <h2>7. Common pitfalls</h2>
+  <ul>
+    <li>❌ Don't dump your entire dataset into one prompt — use <strong>Selection</strong> to scope.</li>
+    <li>❌ Don't paste raw PII (IDs, phone numbers) — run <strong>PII Mask</strong> first.</li>
+    <li>✅ In multi-turn chats, reference prior tables/columns; the model keeps context.</li>
+  </ul>
+
+  <div class="help-pager">
+    <a class="prev" href="index.html">← Index</a>
+    <a class="next" href="buttons.html">Button Reference →</a>
+  </div>
+</body>
+</html>

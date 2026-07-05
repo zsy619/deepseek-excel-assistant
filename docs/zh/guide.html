@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>用户指南 · DeepSeek Excel Assistant</title>
+  <link rel="stylesheet" href="../shared.css" />
+</head>
+<body>
+  <h1>🚀 用户指南</h1>
+  <p>本指南面向第一次使用本插件的用户。读完即可上手所有日常场景。</p>
+
+  <h2>1. 安装与启动</h2>
+  <ol>
+    <li>在 Office 365 / LTSC Standard / Mac 2024 中打开 Excel。</li>
+    <li>通过 <strong>插入 → 我的加载项</strong> 加载 <code>manifest.xml</code>。</li>
+    <li>任务窗格顶部会出现 <strong>DeepSeek</strong> 选项卡。</li>
+    <li>点 <kbd>⚙</kbd> 图标打开设置面板，填入 API Key 和模型端点。</li>
+  </ol>
+
+  <h2>2. 第一次对话</h2>
+  <ol>
+    <li>在任务窗格的输入框里键入问题，例如 <em>"帮我总结这张销售表"</em>。</li>
+    <li>可选：先在 Excel 里选中一段数据，再点 <strong>📊 选区</strong> 按钮把数据拼到 prompt 后面。</li>
+    <li>点 <strong>发送</strong>。AI 流式回复会逐字显示。</li>
+    <li>点 <strong>📌 插入</strong> 可把 AI 回复直接写回当前单元格。</li>
+  </ol>
+
+  <h2>3. 快捷键</h2>
+  <table>
+    <tr><th>快捷键</th><th>动作</th></tr>
+    <tr><td><kbd>⌘ K</kbd> / <kbd>Ctrl K</kbd></td><td>打开命令面板</td></tr>
+    <tr><td><kbd>⌘ N</kbd></td><td>新建会话</td></tr>
+    <tr><td><kbd>⌘ H</kbd></td><td>打开/关闭历史侧栏</td></tr>
+    <tr><td><kbd>⌘ B</kbd></td><td>知识库</td></tr>
+    <tr><td><kbd>⌘ ⇧ S</kbd></td><td>分享会话</td></tr>
+    <tr><td><kbd>⌘ D</kbd></td><td>用量看板</td></tr>
+    <tr><td><kbd>⌘ /</kbd></td><td>快捷键说明</td></tr>
+    <tr><td><kbd>Esc</kbd></td><td>关闭弹窗/面板</td></tr>
+  </table>
+
+  <h2>4. Excel 上下文抓取</h2>
+  <p>AI 对话可以引用当前选中的数据。具体做法：</p>
+  <ul>
+    <li>在 Excel 里 <strong>选中一段连续区域</strong>（含表头）。</li>
+    <li>点 Ribbon 上的 <strong>📊 Excel 上下文</strong> 按钮，或点任务窗格的 <strong>📊 选区</strong>。</li>
+    <li>系统会把选中区域的<strong>地址、表头、前 50 行样例</strong>拼到 prompt 后面。</li>
+  </ul>
+  <blockquote>
+    💡 <strong>小贴士</strong>：样例数据越多，AI 推断越准。但超过 200 行后会<strong>截断</strong>，以免 token 超限。
+  </blockquote>
+
+  <h2>5. 系统提示词（高级）</h2>
+  <p>在设置面板的 <strong>系统提示词</strong> 字段，你可以自定义 AI 角色。例如：</p>
+  <pre><code>你是一名资深财务分析师，回答必须严谨，给出可验证的 Excel 公式或 VBA 代码。</code></pre>
+  <p>系统提示词对所有会话生效。</p>
+
+  <h2>6. 历史会话</h2>
+  <ul>
+    <li>最多保留 50 个会话，超过后自动删除最早的。</li>
+    <li>支持按标题搜索（<kbd>⌘ H</kbd> 打开侧栏后顶部输入）。</li>
+    <li>可重命名、导出 Markdown、批量删除。</li>
+  </ul>
+
+  <h2>7. 常见误区</h2>
+  <ul>
+    <li>❌ 不要把所有数据一次发给 AI —— 用 <strong>选区</strong> 控制范围。</li>
+    <li>❌ 不要把敏感数据（身份证号、手机号）粘贴到 prompt 里 —— 用 <strong>PII 脱敏</strong> 按钮先扫一遍。</li>
+    <li>✅ 多轮对话时引用上一轮的表格/字段，AI 会自动结合上下文。</li>
+  </ul>
+
+  <div class="help-pager">
+    <a class="prev" href="index.html">← 返回目录</a>
+    <a class="next" href="buttons.html">按钮参考 →</a>
+  </div>
+</body>
+</html>
